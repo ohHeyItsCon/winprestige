@@ -1,0 +1,90 @@
+{
+  "_comment": "How WinPrestige sorts what it finds. Rules run top to bottom and the first match wins. 'field' is one of: name, id (winget id, or ARP\\... / MSIX\\... id), key (uninstall registry key name), publisher, uninstall (uninstall command), location (install folder). 'match' is a case-insensitive regex.",
+
+  "categories": [
+    { "id": "apps",      "title": "Applications",                  "selected": true,  "hidden": false, "hint": "Programs you installed." },
+    { "id": "launchers", "title": "Game launchers",                "selected": true,  "hidden": false, "hint": "Launchers, plus games that install their own launcher (like VALORANT)." },
+    { "id": "store",     "title": "Microsoft Store apps",          "selected": true,  "hidden": false, "hint": "Reinstalled from the Store." },
+    { "id": "drivers",   "title": "Drivers & hardware",            "selected": false, "hidden": false, "hint": "Windows Update or your GPU app normally brings these back." },
+    { "id": "runtimes",  "title": "Runtimes & frameworks",         "selected": false, "hidden": false, "hint": "Apps reinstall what they need. The common C++ runtimes are ticked." },
+    { "id": "bundled",   "title": "Installed by another app",      "selected": false, "hidden": false, "hint": "Comes back when the app it belongs to is reinstalled." },
+    { "id": "games",     "title": "Games (reinstall from launcher)", "selected": false, "hidden": true, "hint": "Skipped. Tick a Steam game to queue it in Steam after the restore." },
+    { "id": "system",    "title": "Windows built-in",              "selected": false, "hidden": true,  "hint": "Ships with Windows." }
+  ],
+
+  "rules": [
+    { "category": "launchers", "field": "key",  "match": "^Riot Game (?!Riot_Client)", "launcherGame": true },
+    { "category": "launchers", "field": "name", "match": "^(Roblox Player|Roblox Studio|Minecraft Launcher)$", "launcherGame": true },
+    { "category": "launchers", "field": "id",   "match": "^MSIX\\\\(Microsoft\\.GamingApp|Microsoft\\.4297127D64EC6)_" },
+    { "category": "launchers", "field": "id",   "match": "^(Valve\\.Steam|EpicGames\\.EpicGamesLauncher|Ubisoft\\.Connect|ElectronicArts\\.EADesktop|ElectronicArts\\.Origin|Blizzard\\.BattleNet|GOG\\.Galaxy|RockstarGames\\.Launcher|Amazon\\.Games|ItchIo\\.Itch|HeroicGamesLauncher\\.HeroicGamesLauncher|Playnite\\.Playnite|Overwolf\\.CurseForge|Overwolf\\.Overwolf|Modrinth\\.ModrinthApp|PrismLauncher\\.PrismLauncher|Moonsworth\\.LunarClient|Mojang\\.MinecraftLauncher|Roblox\\.Roblox|HoYoverse\\.HoYoPlay)$" },
+    { "category": "launchers", "field": "name", "match": "^(Steam|Epic Games Launcher|Ubisoft Connect|EA app|EA|Battle\\.net|GOG GALAXY.*|Rockstar Games Launcher|Amazon Games|itch|Playnite|Modrinth App|Prism Launcher|Lunar Client|HoYoPlay|XBOX|Xbox)$" },
+
+    { "category": "games", "field": "key",       "match": "^Steam App (\\d+)$", "via": "Steam", "gameUri": "steam://install/{1}" },
+    { "category": "games", "field": "uninstall", "match": "steam://uninstall/(\\d+)", "via": "Steam", "gameUri": "steam://install/{1}" },
+    { "category": "games", "field": "location",  "match": "\\\\steamapps\\\\common\\\\", "via": "Steam" },
+    { "category": "games", "field": "uninstall", "match": "com\\.epicgames\\.launcher://", "via": "Epic Games" },
+    { "category": "games", "field": "location",  "match": "\\\\Epic Games\\\\(?!Launcher)", "via": "Epic Games" },
+    { "category": "games", "field": "key",       "match": "^Uplay Install \\d+$", "via": "Ubisoft Connect" },
+    { "category": "games", "field": "uninstall", "match": "Blizzard Uninstaller\\.exe.*--uid=(?!battle\\.net)", "via": "Battle.net" },
+    { "category": "games", "field": "uninstall", "match": "\\\\EAInstaller\\\\", "via": "EA app" },
+    { "category": "games", "field": "uninstall", "match": "Rockstar Games\\\\Launcher\\\\uninstall\\.exe.*-uninstall=", "via": "Rockstar Games Launcher" },
+    { "category": "games", "field": "publisher", "match": "^GOG\\.com$", "via": "GOG GALAXY" },
+    { "category": "games", "field": "location",  "match": "\\\\GOG Games\\\\", "via": "GOG GALAXY" },
+    { "category": "games", "field": "location",  "match": "\\\\XboxGames\\\\", "via": "Xbox app" },
+
+    { "category": "bundled", "field": "name", "match": "^Riot (Client|Vanguard)\\b", "via": "VALORANT / League of Legends" },
+    { "category": "bundled", "field": "name", "match": "^Adobe (After Effects|Animate|Audition|Bridge|Character Animator|Dimension|Dreamweaver|Illustrator|InCopy|InDesign|Lightroom|Media Encoder|Photoshop|Premiere|Substance|XD|Fresco|Aero|Acrobat(?! Reader))", "via": "Adobe Creative Cloud" },
+    { "category": "bundled", "field": "name", "match": "^(Adobe Genuine Service|Adobe Native Client|Adobe Refresh Manager|Adobe Notification Client|Adobe CEF Helper|UXP WebView Support|CCX Process)", "via": "Adobe Creative Cloud" },
+    { "category": "bundled", "field": "name", "match": "^CLIP STUDIO \\d", "via": "CLIP STUDIO PAINT" },
+    { "category": "bundled", "field": "name", "match": "^Rockstar Games (SDK|Social Club)", "via": "Rockstar Games Launcher" },
+    { "category": "bundled", "field": "name", "match": "^Elgato Wave Link Driver", "via": "Elgato Wave Link" },
+    { "category": "bundled", "field": "name", "match": "^iCloud Outlook", "via": "iCloud" },
+    { "category": "bundled", "field": "name", "match": "^(Apple Application Support|Apple Mobile Device Support|Apple Software Update|Bonjour)\\b", "via": "iTunes / iCloud" },
+    { "category": "bundled", "field": "name", "match": "^Microsoft Teams Meeting Add-in", "via": "Microsoft Teams / Office" },
+    { "category": "bundled", "field": "name", "match": "^(Microsoft Visual Studio Installer|vs_|Windows SDK AddOn|Windows Software Development Kit|Microsoft Visual Studio Setup)", "via": "Visual Studio" },
+    { "category": "bundled", "field": "name", "match": "^Mozilla Maintenance Service", "via": "Firefox" },
+    { "category": "bundled", "field": "name", "match": "^NordUpdater", "via": "NordVPN" },
+    { "category": "bundled", "field": "name", "match": "^Virtual Desktop Service", "via": "Virtual Desktop Streamer" },
+    { "category": "bundled", "field": "name", "match": "^Valor Updater", "via": "Valor Companion App" },
+    { "category": "bundled", "field": "name", "match": "^PawnIO$", "via": "FanControl / hardware monitors" },
+    { "category": "bundled", "field": "name", "match": "^Epic Online Services$", "via": "Epic Games Launcher" },
+
+    { "category": "system", "field": "id",   "match": "^Microsoft\\.(AppInstaller|OneDrive|Edge|EdgeWebView2Runtime)$" },
+    { "category": "system", "field": "id",   "match": "^MSIX\\\\Microsoft\\.(Windows(?!Terminal)|Xbox|GamingServices|VCLibs|NET\\.Native|UI\\.Xaml|WinAppRuntime|WindowsAppRuntime|Services\\.Store|StorePurchaseApp|Winget\\.Source|DesktopAppInstaller|Ink\\.|OneDriveSync|MicrosoftEdge|SecHealthUI|ScreenSketch|ZuneMusic|ZuneVideo|YourPhone|GetHelp|Getstarted|MicrosoftStickyNotes|Office\\.ActionsServer|OfficePushNotificationUtility|ApplicationCompatibilityEnhancements|PowerAutomateDesktop|MicrosoftOfficeHub|Todos|Bing|Paint|People|549981C3F5F10|Copilot|Edge\\.|StartExperiencesApp|WidgetsPlatformRuntime|OutlookForWindows|MicrosoftSolitaireCollection|HEIFImageExtension|HEVCVideoExtension|AV1VideoExtension|AVCEncoderVideoExtension|VP9VideoExtensions|WebMediaExtensions|WebpImageExtension|RawImageExtension|MPEG2VideoExtension|MicrosoftJournal|Whiteboard|LanguageExperiencePack|CrossDevice)" },
+    { "category": "system", "field": "id",   "match": "^MSIX\\\\(MicrosoftWindows\\.|MicrosoftCorporationII\\.(WinAppRuntime|QuickAssist)|aimgr_|MSTeams_|Clipchamp\\.|MicrosoftTeams_)" },
+    { "category": "system", "field": "name", "match": "^(Microsoft Edge( Update| WebView2 Runtime)?|Microsoft Update Health Tools|Windows PC Health Check|App Installer|Microsoft Store|Windows Package Manager Source.*|Microsoft Windows Application Compatibility Fix Database|AMD Application Compatibility Database File|Update for .*|Security Update for .*)$" },
+    { "category": "system", "field": "name", "match": "\\.sdb$" },
+
+    { "category": "drivers", "field": "name", "match": "\\bDriver$" },
+    { "category": "bundled", "field": "name", "match": "Survey Program|Extended Survey", "via": "printer software" },
+    { "category": "drivers", "field": "name", "match": "^(AMD (Chipset|Software|Install Manager|Ryzen Master SDK)|NVIDIA (Graphics Driver|HD Audio Driver|FrameView SDK|USBC Driver|Virtual Audio|nView)|Realtek |Intel\\(R\\) (Chipset|Management|Serial IO|Rapid Storage|Wireless|Network|Graphics Driver)|Windows Driver Package|MSI Center SDK)" },
+    { "category": "drivers", "field": "id",   "match": "^MSIX\\\\(AdvancedMicroDevicesInc-RSXCM|NVIDIACorp\\.NVIDIAControlPanel|RealtekSemiconductorCorp\\.|A-Volute\\.Nahimic|AppUp\\.IntelGraphicsExperience|AppUp\\.IntelManagementandSecurityStatus)" },
+
+    { "category": "runtimes", "field": "id",   "match": "^(Microsoft\\.(VCRedist|VCLibs|DotNet\\.(DesktopRuntime|Runtime|AspNetCore|HostingBundle|Native|Framework)|UI\\.Xaml|WindowsAppRuntime|DirectX|XNARedist|GameInput|VSTOR|AccessDatabaseEngine)|Nvidia\\.PhysX|NDI\\.NDIRuntime|Oracle\\.JavaRuntimeEnvironment|KhronosGroup\\.VulkanRT|OpenAL\\.OpenAL)" },
+    { "category": "runtimes", "field": "name", "match": "^(Microsoft Visual C\\+\\+|Microsoft \\.NET|Microsoft \\.Net|Microsoft Windows Desktop Runtime|Microsoft ASP\\.NET|DirectX$|Microsoft XNA|Java( \\d+ Update|\\(TM\\))|NVIDIA PhysX|NDI \\d+ Runtime|PlayStation\\(R\\) PC SDK Runtime|Microsoft GameInput|Vulkan Run|OpenAL|WindowsAppRuntime|WinAppRuntime|Microsoft\\.UI\\.Xaml)" }
+  ],
+
+  "essentialRuntimes": [ "Microsoft.VCRedist.2015+.x64", "Microsoft.VCRedist.2015+.x86" ],
+
+  "_overrides": "Force a winget id for an app name, e.g. { \"match\": \"^Some App\", \"id\": \"Vendor.SomeApp\", \"source\": \"winget\" }.",
+  "wingetOverrides": [],
+
+  "knownLinks": [
+    { "match": "^NVIDIA App\\b",        "url": "https://www.nvidia.com/en-us/software/nvidia-app/" },
+    { "match": "^NVIDIA Broadcast\\b",  "url": "https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-app/" },
+    { "match": "^Equalizer APO\\b",     "url": "https://sourceforge.net/projects/equalizerapo/" },
+    { "match": "^Microsoft 365\\b",     "url": "https://www.office.com/" },
+    { "match": "^AMD (Software|Chipset)", "url": "https://www.amd.com/en/support/download/drivers.html" },
+    { "match": "^BakkesMod\\b",         "url": "https://bakkesmod.com/" }
+  ],
+
+  "_regions": "Picks the right regional package when several share a name (VALORANT has one per server region).",
+  "regionSuffix": {
+    "US": "NA", "CA": "NA",
+    "GB": "EU", "IE": "EU", "DE": "EU", "FR": "EU", "ES": "EU", "IT": "EU", "NL": "EU", "BE": "EU", "SE": "EU", "NO": "EU", "DK": "EU", "FI": "EU", "PL": "EU", "PT": "EU", "AT": "EU", "CH": "EU", "CZ": "EU", "TR": "EU",
+    "BR": "BR",
+    "MX": "LATAM", "AR": "LATAM", "CL": "LATAM", "CO": "LATAM", "PE": "LATAM",
+    "KR": "KR",
+    "JP": "AP", "AU": "AP", "NZ": "AP", "SG": "AP", "PH": "AP", "IN": "AP", "TW": "AP", "HK": "AP"
+  }
+}

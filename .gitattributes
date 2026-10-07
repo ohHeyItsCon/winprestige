@@ -1,0 +1,4 @@
+# Batch files need Windows line endings; images and icons are binary.
+*.cmd text eol=crlf
+*.ico binary
+*.png binary

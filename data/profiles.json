@@ -1,0 +1,293 @@
+[
+  {
+    "id": "obs", "name": "OBS Studio", "app": "^OBS Studio",
+    "processes": ["obs64", "obs32"],
+    "items": [
+      { "path": "%APPDATA%\\obs-studio", "exclude": ["logs", "crashes", "profiler_data", "updates", ".sentinel", "Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "blob_storage", "Crashpad"] },
+      { "path": "%PROGRAMDATA%\\obs-studio\\plugins" }
+    ],
+    "rewrite": ["%APPDATA%\\obs-studio\\basic\\scenes\\*.json", "%APPDATA%\\obs-studio\\basic\\profiles\\*\\basic.ini", "%APPDATA%\\obs-studio\\global.ini", "%APPDATA%\\obs-studio\\user.ini"],
+    "special": "obsMedia",
+    "notes": "Scene collections, profiles, hotkeys, docks and plugin settings, plus plugins installed in ProgramData. Plugins inside Program Files\\obs-studio must be reinstalled."
+  },
+  {
+    "id": "fancontrol", "name": "FanControl", "app": "^FanControl$",
+    "processes": ["FanControl"],
+    "installDirFallback": ["%PROGRAMFILES(X86)%\\FanControl", "%PROGRAMFILES%\\FanControl"],
+    "items": [
+      { "path": "%INSTALLDIR%\\Configurations", "exclude": ["*.deps.json", "*.runtimeconfig.json"] },
+      { "path": "%INSTALLDIR%\\Plugins" }
+    ],
+    "notes": "Fan curves, controls and sensor names. Restored into FanControl's install folder after it is reinstalled. Sensors match on the same hardware."
+  },
+  {
+    "id": "streamdeck", "name": "Elgato Stream Deck", "app": "^Elgato Stream Deck",
+    "processes": ["StreamDeck"],
+    "items": [ { "path": "%APPDATA%\\Elgato\\StreamDeck", "include": ["ProfilesV2", "ProfilesV3", "Plugins", "IconPacks", "Audio", "Data"], "exclude": ["logs"] } ],
+    "registry": ["HKCU\\Software\\Elgato Systems GmbH\\StreamDeck"],
+    "notes": "Profiles, buttons, icon packs, sounds and installed plugins."
+  },
+  {
+    "id": "wavelink", "name": "Elgato Wave Link", "app": "^Elgato Wave Link$",
+    "processes": ["WaveLink", "WaveLinkSE"],
+    "items": [ { "path": "%APPDATA%\\Elgato\\WaveLink", "exclude": ["logs", "Downloads", "Marketplace", "*.cache"] } ],
+    "registry": ["HKCU\\Software\\Elgato Systems GmbH\\Wave Link"],
+    "notes": "Mixes, channel routing and app routing."
+  },
+  {
+    "id": "elgato-camerahub", "name": "Elgato Camera Hub", "app": "^Elgato Camera Hub",
+    "processes": ["Camera Hub"],
+    "items": [ { "path": "%APPDATA%\\Elgato\\CameraHub", "exclude": ["logs"] } ]
+  },
+  {
+    "id": "elgato-4k", "name": "Elgato 4K Capture Utility", "app": "^Elgato 4K Capture",
+    "processes": ["4KCaptureUtility"],
+    "items": [ { "path": "%APPDATA%\\Elgato\\4KCaptureUtility", "exclude": ["logs"] } ]
+  },
+  {
+    "id": "icue", "name": "Corsair iCUE", "app": "^Corsair iCUE",
+    "processes": ["iCUE"],
+    "items": [
+      { "path": "%APPDATA%\\Corsair\\CUE5", "exclude": ["logs", "data_cache"] },
+      { "path": "%APPDATA%\\Corsair\\CUE4", "exclude": ["logs"] }
+    ],
+    "notes": "Lighting, fan and device profiles. Restart the PC after restoring."
+  },
+  {
+    "id": "ghub", "name": "Logitech G HUB", "app": "^Logitech G HUB",
+    "processes": ["lghub", "lghub_agent", "lghub_system_tray", "lghub_updater"],
+    "items": [ { "path": "%LOCALAPPDATA%\\LGHUB", "exclude": ["logs", "cache", "*.log"] } ],
+    "notes": "Device settings, macros and game profiles."
+  },
+  {
+    "id": "nzxtcam", "name": "NZXT CAM", "app": "^NZXT CAM",
+    "processes": ["NZXT CAM"],
+    "items": [ { "path": "%APPDATA%\\NZXT CAM", "exclude": ["Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache", "Crashpad", "logs", "sentry", "blob_storage", "Shared Dictionary", "lockfile"] } ]
+  },
+  {
+    "id": "steelseries", "name": "SteelSeries GG", "app": "^SteelSeries GG",
+    "processes": ["SteelSeriesGG", "SteelSeriesGGClient", "SteelSeriesEngine", "SteelSeriesSonar"],
+    "items": [ { "path": "%PROGRAMDATA%\\SteelSeries\\GG", "exclude": ["Logs", "updates", "*.log"] } ],
+    "notes": "Engine and Sonar settings. Restart the PC after restoring."
+  },
+  {
+    "id": "signalrgb", "name": "SignalRGB", "app": "^SignalRGB",
+    "processes": ["SignalRgb", "SignalRgbLauncher"],
+    "items": [ { "path": "%APPDATA%\\WhirlwindFX", "exclude": ["logs", "Cache"] } ]
+  },
+  {
+    "id": "ngenuity", "name": "HyperX NGENUITY", "app": "^HyperX NGENUITY",
+    "processes": ["NGENUITY"],
+    "items": [ { "path": "%APPDATA%\\NGENUITY", "exclude": ["logs", "Cache", "Code Cache", "GPUCache"] } ]
+  },
+  {
+    "id": "voicemod", "name": "Voicemod", "app": "^Voicemod",
+    "processes": ["Voicemod", "VoicemodDesktop"],
+    "items": [ { "path": "%APPDATA%\\Voicemod", "exclude": ["logs", "Cache"] } ]
+  },
+  {
+    "id": "eqapo", "name": "Equalizer APO", "app": "^Equalizer APO",
+    "items": [ { "path": "%PROGRAMFILES%\\EqualizerAPO\\config" } ],
+    "notes": "EQ presets. After reinstalling, run the Configurator once to pick your devices again."
+  },
+  {
+    "id": "bakkesmod", "name": "BakkesMod", "app": "^BakkesMod",
+    "processes": ["BakkesMod"],
+    "items": [ { "path": "%APPDATA%\\bakkesmod\\bakkesmod", "exclude": ["crashes", "logs", "*.log", "bakkesmodsdk"] } ],
+    "notes": "Settings, binds, plugins and training packs."
+  },
+  {
+    "id": "wallpaperengine", "name": "Wallpaper Engine", "app": "^Wallpaper Engine$",
+    "processes": ["wallpaper64", "wallpaper32"],
+    "items": [
+      { "path": "%INSTALLDIR%\\config.json" },
+      { "path": "%INSTALLDIR%\\projects\\myprojects" }
+    ],
+    "notes": "Playlists, monitor assignments and wallpapers you made. Workshop wallpapers come back through Steam."
+  },
+  {
+    "id": "minecraft", "name": "Minecraft worlds & settings", "app": "^Minecraft Launcher",
+    "items": [ { "path": "%APPDATA%\\.minecraft", "include": ["saves", "resourcepacks", "shaderpacks", "screenshots", "schematics", "config", "mods", "options.txt", "optionsof.txt", "optionsshaders.txt", "servers.dat", "launcher_profiles.json"] } ],
+    "notes": "Worlds, packs, mods and options. Game files re-download on their own. Close Minecraft first."
+  },
+  {
+    "id": "prism", "name": "Prism Launcher instances", "app": "^Prism Launcher",
+    "processes": ["prismlauncher"],
+    "items": [ { "path": "%APPDATA%\\PrismLauncher", "exclude": ["libraries", "assets", "meta", "cache", "logs", "java", "updater", "catpacks"] } ]
+  },
+  {
+    "id": "modrinth", "name": "Modrinth App profiles", "app": "^Modrinth App",
+    "processes": ["Modrinth App"],
+    "items": [ { "path": "%APPDATA%\\ModrinthApp", "exclude": ["meta", "caches", "launcher_logs", "logs", "crash-reports"] } ]
+  },
+  {
+    "id": "lunar", "name": "Lunar Client", "app": "Lunar Client",
+    "processes": ["Lunar Client"],
+    "items": [ { "path": "%USERPROFILE%\\.lunarclient", "include": ["settings", "profiles"] } ]
+  },
+  {
+    "id": "curseforge", "name": "CurseForge instances", "app": "^CurseForge",
+    "items": [ { "path": "%USERPROFILE%\\curseforge\\minecraft\\Instances" } ]
+  },
+  {
+    "id": "vortex", "name": "Vortex", "app": "^Vortex",
+    "processes": ["Vortex"],
+    "items": [ { "path": "%APPDATA%\\Vortex", "exclude": ["temp", "logs", "*.log", "Cache", "Code Cache", "GPUCache", "Crashpad"] } ],
+    "notes": "Mod manager state and profiles. Mod files live in your staging folder."
+  },
+  {
+    "id": "handbrake", "name": "HandBrake", "app": "^HandBrake",
+    "items": [ { "path": "%APPDATA%\\HandBrake", "exclude": ["logs"] } ]
+  },
+  {
+    "id": "audacity", "name": "Audacity", "app": "^Audacity",
+    "processes": ["Audacity"],
+    "items": [ { "path": "%APPDATA%\\audacity" } ]
+  },
+  {
+    "id": "vlc", "name": "VLC", "app": "^VLC",
+    "processes": ["vlc"],
+    "items": [ { "path": "%APPDATA%\\vlc", "exclude": ["art", "ml.xspf"] } ]
+  },
+  {
+    "id": "rustdesk", "name": "RustDesk", "app": "^RustDesk", "sensitive": true,
+    "processes": ["rustdesk"],
+    "items": [ { "path": "%APPDATA%\\RustDesk\\config" } ],
+    "notes": "Keeps your RustDesk ID and saved connections. Includes your access password."
+  },
+  {
+    "id": "meld", "name": "Meld Studio", "app": "^Meld Studio",
+    "processes": ["Meld Studio", "meld"],
+    "items": [ { "path": "%DOCUMENTS%\\MeldStudio" } ]
+  },
+  {
+    "id": "clipstudio", "name": "CLIP STUDIO PAINT", "app": "^CLIP STUDIO PAINT",
+    "processes": ["CLIPStudioPaint", "CLIPStudio"],
+    "items": [
+      { "path": "%APPDATA%\\CELSYSUserData", "exclude": ["Cache", "Log", "logs"] },
+      { "path": "%APPDATA%\\CELSYS", "exclude": ["Cache", "Log", "logs"] },
+      { "path": "%APPDATA%\\CELSYS_EN", "exclude": ["Cache", "Log", "logs"] }
+    ],
+    "notes": "Settings, brushes, workspaces and downloaded materials."
+  },
+  {
+    "id": "adobe", "name": "Adobe presets & preferences", "app": "^Adobe Creative Cloud",
+    "items": [
+      { "path": "%APPDATA%\\Adobe\\Adobe Photoshop *", "exclude": ["CT Font Cache", "web-cache-temp", "Logs", "*.log"] },
+      { "path": "%APPDATA%\\Adobe\\Adobe Illustrator * Settings" },
+      { "path": "%APPDATA%\\Adobe\\After Effects", "exclude": ["Logs", "*.log"] },
+      { "path": "%APPDATA%\\Adobe\\CameraRaw", "exclude": ["Cache", "GPU", "Logs"] },
+      { "path": "%APPDATA%\\Adobe\\Lightroom", "exclude": ["Logs"] },
+      { "path": "%DOCUMENTS%\\Adobe\\Premiere Pro" },
+      { "path": "%DOCUMENTS%\\Adobe\\Adobe Media Encoder" }
+    ],
+    "notes": "Actions, brushes, workspaces, shortcuts and Camera Raw / Lightroom presets. Restore after Creative Cloud has reinstalled your apps."
+  },
+  {
+    "id": "c4d", "name": "Cinema 4D preferences", "app": "^Maxon Cinema 4D",
+    "items": [ { "path": "%APPDATA%\\Maxon", "exclude": ["_bugreports", "cache", "logs"] } ]
+  },
+  {
+    "id": "virtualdesktop", "name": "Virtual Desktop Streamer", "app": "^Virtual Desktop Streamer",
+    "processes": ["VirtualDesktop.Streamer"],
+    "items": [ { "path": "%APPDATA%\\Virtual Desktop", "exclude": ["Logs"] } ]
+  },
+  {
+    "id": "jdownloader", "name": "JDownloader 2", "app": "^JDownloader",
+    "processes": ["JDownloader2"],
+    "items": [ { "path": "%LOCALAPPDATA%\\JDownloader 2\\cfg" } ],
+    "notes": "Settings, accounts and link lists."
+  },
+  {
+    "id": "terminal", "name": "Windows Terminal", "app": "^Windows Terminal",
+    "processes": ["WindowsTerminal"],
+    "items": [ { "path": "%LOCALAPPDATA%\\Packages\\Microsoft.WindowsTerminal_8wekyb3d8bbwe\\LocalState\\settings.json" } ]
+  },
+  {
+    "id": "pwsh-profile", "name": "PowerShell profiles",
+    "items": [
+      { "path": "%DOCUMENTS%\\WindowsPowerShell", "include": ["Microsoft.PowerShell_profile.ps1", "profile.ps1", "Microsoft.PowerShellISE_profile.ps1", "Microsoft.VSCode_profile.ps1"] },
+      { "path": "%DOCUMENTS%\\PowerShell", "include": ["Microsoft.PowerShell_profile.ps1", "profile.ps1", "Microsoft.VSCode_profile.ps1"] }
+    ]
+  },
+  {
+    "id": "git", "name": "Git config", "app": "^Git$",
+    "items": [ { "path": "%USERPROFILE%\\.gitconfig" }, { "path": "%USERPROFILE%\\.gitignore_global" } ]
+  },
+  {
+    "id": "ssh", "name": "SSH keys", "sensitive": true,
+    "items": [ { "path": "%USERPROFILE%\\.ssh" } ],
+    "notes": "Private keys. Only back these up to storage nobody else can read."
+  },
+  {
+    "id": "ghcli", "name": "GitHub CLI", "app": "^GitHub CLI",
+    "items": [ { "path": "%APPDATA%\\GitHub CLI\\config.yml" } ],
+    "notes": "Settings only. Your sign-in token (hosts.yml) is left out, so you'll sign in again."
+  },
+  {
+    "id": "vscode", "name": "VS Code", "app": "^Microsoft Visual Studio Code",
+    "processes": ["Code"],
+    "items": [ { "path": "%APPDATA%\\Code\\User", "include": ["settings.json", "keybindings.json", "snippets", "tasks.json", "profiles"] } ],
+    "notes": "Settings, keybindings and snippets. Settings Sync covers this too if you use it."
+  },
+  {
+    "id": "notepadpp", "name": "Notepad++", "app": "^Notepad\\+\\+",
+    "processes": ["notepad++"],
+    "items": [ { "path": "%APPDATA%\\Notepad++", "exclude": ["backup"] } ]
+  },
+  {
+    "id": "sharex", "name": "ShareX", "app": "^ShareX",
+    "processes": ["ShareX"],
+    "items": [ { "path": "%DOCUMENTS%\\ShareX", "exclude": ["Screenshots", "Logs", "Backup"] } ]
+  },
+  {
+    "id": "powertoys", "name": "PowerToys", "app": "^PowerToys",
+    "processes": ["PowerToys"],
+    "items": [ { "path": "%LOCALAPPDATA%\\Microsoft\\PowerToys", "exclude": ["Logs", "Updates", "*.log", "Telemetry"] } ]
+  },
+  {
+    "id": "everything", "name": "Everything", "app": "^Everything",
+    "processes": ["Everything"],
+    "items": [ { "path": "%APPDATA%\\Everything", "include": ["Everything.ini", "Bookmarks.csv", "Filters.csv"] } ]
+  },
+  {
+    "id": "rainmeter", "name": "Rainmeter", "app": "^Rainmeter",
+    "processes": ["Rainmeter"],
+    "items": [ { "path": "%APPDATA%\\Rainmeter" }, { "path": "%DOCUMENTS%\\Rainmeter\\Skins" } ]
+  },
+  {
+    "id": "qbittorrent", "name": "qBittorrent", "app": "^qBittorrent",
+    "processes": ["qbittorrent"],
+    "items": [ { "path": "%APPDATA%\\qBittorrent" }, { "path": "%LOCALAPPDATA%\\qBittorrent", "exclude": ["logs"] } ]
+  },
+  {
+    "id": "afterburner", "name": "MSI Afterburner", "app": "^MSI Afterburner",
+    "processes": ["MSIAfterburner"],
+    "items": [ { "path": "%PROGRAMFILES(X86)%\\MSI Afterburner\\Profiles" } ]
+  },
+  {
+    "id": "flowlauncher", "name": "Flow Launcher", "app": "^Flow Launcher",
+    "processes": ["Flow.Launcher"],
+    "items": [ { "path": "%APPDATA%\\FlowLauncher", "exclude": ["Logs", "Cache"] } ]
+  },
+  {
+    "id": "streamlabs", "name": "Streamlabs Desktop", "app": "^Streamlabs",
+    "processes": ["Streamlabs OBS", "Streamlabs Desktop"],
+    "items": [ { "path": "%APPDATA%\\slobs-client", "exclude": ["Cache", "Code Cache", "GPUCache", "logs", "Crashpad"] } ]
+  },
+  { "id": "putty", "name": "PuTTY sessions", "app": "^PuTTY", "registry": ["HKCU\\Software\\SimonTatham\\PuTTY"] },
+  { "id": "7zip", "name": "7-Zip settings", "app": "^7-Zip", "registry": ["HKCU\\Software\\7-Zip"] },
+  { "id": "explorerpatcher", "name": "ExplorerPatcher", "app": "^ExplorerPatcher", "registry": ["HKCU\\Software\\ExplorerPatcher"] },
+  {
+    "id": "firefox", "name": "Firefox profile", "app": "^Mozilla Firefox", "sensitive": true,
+    "processes": ["firefox"],
+    "items": [ { "path": "%APPDATA%\\Mozilla\\Firefox", "exclude": ["cache2", "startupCache", "Crash Reports", "datareporting", "minidumps", "saved-telemetry-pings", "*.log"] } ],
+    "notes": "Bookmarks, saved passwords, extensions and history. Firefox Sync does the same if you use it."
+  },
+  {
+    "id": "operagx", "name": "Opera GX profile", "app": "^Opera GX", "sensitive": true,
+    "processes": ["opera"],
+    "items": [ { "path": "%APPDATA%\\Opera Software\\Opera GX Stable", "exclude": ["Cache", "Code Cache", "GPUCache", "CacheStorage", "ShaderCache", "GrShaderCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "Crash Reports", "*.log"] } ],
+    "notes": "Bookmarks, extensions and settings. Saved passwords are locked to this Windows install, so use Opera Sync for those."
+  }
+]

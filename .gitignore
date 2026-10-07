@@ -1,0 +1,7 @@
+# Build output (attach dist\WinPrestige.zip to a GitHub release instead of committing it)
+/WinPrestige.exe
+/dist/
+
+# Local test backups
+*Backup/
+manifest.json
