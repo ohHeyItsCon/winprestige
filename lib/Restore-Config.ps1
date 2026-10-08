@@ -159,4 +159,4 @@ if ($pairs.Count -and @($spec.rewrite).Count) {
 }
 
 if ($TestRun) { Write-Host "Test run finished for $($spec.name)." }
-else { Write-Host "Restored $copied items for $($spec.name)." }
+else { Write-Host ("Restored {0} {1} for {2}." -f $copied, $(if ($copied -eq 1) { 'item' } else { 'items' }), $spec.name) }

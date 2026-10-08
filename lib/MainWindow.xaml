@@ -491,7 +491,7 @@
 
       <!-- BACKUP -->
       <Grid x:Name="PageBackup" Visibility="Collapsed">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <ScrollViewer x:Name="BackupScroll" VerticalScrollBarVisibility="Auto">
           <StackPanel MaxWidth="980" Margin="24,20,24,24">
             <Border Style="{StaticResource Card}">
               <StackPanel>

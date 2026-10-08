@@ -16,7 +16,7 @@ function Initialize-WP {
         $Sync
     )
     $script:WP.Root = $Root
-    $script:WP.Version = '1.0.0'
+    $script:WP.Version = '1.0.1'
     $script:WP.StateDir = Join-Path $env:LOCALAPPDATA 'WinPrestige'
     if (-not (Test-Path -LiteralPath $script:WP.StateDir)) {
         New-Item -ItemType Directory -Path $script:WP.StateDir -Force | Out-Null

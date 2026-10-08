@@ -18,6 +18,10 @@
 .PARAMETER NoElevate
     Don't ask for administrator rights (installs and some settings folders need them).
 
+.PARAMETER Demo
+    Show a made-up PC full of well-known apps instead of this one, for screenshots and videos.
+    Nothing on this PC is read or changed, and backup and restore are simulated.
+
 .PARAMETER Screenshot
     Testing aid: once background work finishes, render the window to this PNG and exit.
 #>
@@ -26,10 +30,13 @@ param(
     [ValidateSet('Backup', 'Restore')][string]$Mode = 'Backup',
     [string]$BackupPath,
     [switch]$NoElevate,
+    [switch]$Demo,
     [switch]$HideConsole,
     [string]$Screenshot,
     [ValidateSet('Apps', 'Configs', 'Extras', 'Backup', 'Restore')][string]$ScreenshotTab = 'Apps',
-    [int]$ScreenshotWait = 180
+    [int]$ScreenshotWait = 180,
+    [ValidateSet('', 'Backup', 'Restore')][string]$ScreenshotAction = '',
+    [string]$ScreenshotSelect
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,7 +60,7 @@ function ConvertTo-WPUncPath {
 
 #region Elevation --------------------------------------------------------------
 
-if (-not $NoElevate -and -not $Screenshot -and -not (Test-WPAdmin)) {
+if (-not $NoElevate -and -not $Screenshot -and -not $Demo -and -not (Test-WPAdmin)) {
     $selfDir = $WPRoot
     $resolvedDir = ConvertTo-WPUncPath $WPRoot
     if ($resolvedDir.StartsWith('\\')) {
@@ -104,6 +111,7 @@ try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 . (Join-Path $WPRoot 'lib\Core.ps1')
 $sync = [hashtable]::Synchronized(@{ Queue = (New-Object 'System.Collections.Concurrent.ConcurrentQueue[object]'); Cancel = $false })
 Initialize-WP -Root $WPRoot -Sync $sync
+. (Join-Path $WPRoot 'lib\Demo.ps1')
 
 $MidDot = [string][char]0x00B7
 $Ellipsis = [string][char]0x2026
@@ -115,6 +123,7 @@ $SettingsPath = Join-Path $script:WP.StateDir 'settings.json'
 
 function Get-WPSettings {
     $s = @{ Destination = ''; Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{} }
+    if ($Demo) { return $s }
     $raw = $null
     try { $raw = Read-WPJson $SettingsPath } catch { }
     if ($raw) {
@@ -128,6 +137,7 @@ function Get-WPSettings {
 }
 
 function Save-WPSettings {
+    if ($Demo) { return }
     try { Write-WPJson $state.Settings $SettingsPath } catch { }
 }
 
@@ -264,7 +274,7 @@ function Add-WPLogLine {
     $color = switch ($Level) { 'ok' { $Palette.Good } 'warn' { $Palette.Warn } 'error' { $Palette.Bad } 'step' { $Palette.Accent } default { '#B7BDC7' } }
     if ($Level -ne 'info' -or -not $state.LogTarget) { Set-WPStatus $Text }
     $line = (Get-Date).ToString('HH:mm:ss') + '  ' + $Text
-    try { [IO.File]::AppendAllText($state.LogFile, $line + "`r`n") } catch { }
+    if (-not $Demo) { try { [IO.File]::AppendAllText($state.LogFile, $line + "`r`n") } catch { } }
     $list = $state.LogTarget
     if (-not $list) { return }
     $t = New-Object Windows.Controls.TextBlock
@@ -395,7 +405,7 @@ function Start-WPJob {
     $rs.Open()
     $ps = [powershell]::Create()
     $ps.Runspace = $rs
-    $code = "param(`$sync, `$WPRoot, `$P)`n`$ErrorActionPreference = 'Continue'`n. (Join-Path `$WPRoot 'lib\Core.ps1')`nInitialize-WP -Root `$WPRoot -Sync `$sync`n" + $Script.ToString()
+    $code = "param(`$sync, `$WPRoot, `$P)`n`$ErrorActionPreference = 'Continue'`n. (Join-Path `$WPRoot 'lib\Core.ps1')`nInitialize-WP -Root `$WPRoot -Sync `$sync`n. (Join-Path `$WPRoot 'lib\Demo.ps1')`n" + $Script.ToString()
     [void]$ps.AddScript($code).AddArgument($sync).AddArgument($WPRoot).AddArgument($Params)
     $handle = $ps.BeginInvoke()
     [void]$state.Jobs.Add(@{ Name = $Name; PS = $ps; Handle = $handle; Runspace = $rs; OnDone = $OnDone })
@@ -924,11 +934,15 @@ function Start-WPScan {
     $ui.AppEmptyText.Text = "Scanning your apps$Ellipsis"
     $state.LogTarget = $null
     Start-WPJob 'Scan' {
-        $apps = Get-WPInventory
-        $configs = Get-WPConfigCandidates $apps $P.CustomConfigs
-        $extras = Get-WPExtras
+        if ($P.Demo) {
+            $apps = Get-WPDemoApps; $configs = Get-WPDemoConfigs; $extras = Get-WPDemoExtras
+        } else {
+            $apps = Get-WPInventory
+            $configs = Get-WPConfigCandidates $apps $P.CustomConfigs
+            $extras = Get-WPExtras
+        }
         @{ Apps = $apps; Configs = $configs; Extras = $extras }
-    } @{ CustomConfigs = @($state.Settings.CustomConfigs) } {
+    } @{ CustomConfigs = @($state.Settings.CustomConfigs); Demo = [bool]$Demo } {
         param($r, $err)
         if ($err -or -not $r) {
             $ui.AppEmptyText.Text = 'The scan failed. See the status bar, then press Scan this PC to try again.'
@@ -938,14 +952,17 @@ function Start-WPScan {
         Set-WPConfigs @($r.Configs)
         Set-WPExtras @($r.Extras)
         $ui.ScanInfo.Text = "Scanned $(Get-Date -Format 't'). Rescan any time to pick up new or removed apps."
-        Save-WPScanCache
-        Start-WPLookup $state.Apps
-        Start-WPMeasure
+        if (-not $Demo) {
+            Save-WPScanCache
+            Start-WPLookup $state.Apps
+            Start-WPMeasure
+        }
     }
 }
 
 function Start-WPLookup {
     param([object[]]$Apps, [switch]$Force)
+    if ($Demo) { Set-WPStatus 'Every ticked app already has a download source.'; return }
     Start-WPJob 'Lookup' {
         Resolve-WPLinks $P.Apps $P.Chosen -Force:$P.Force
         'done'
@@ -958,6 +975,7 @@ function Start-WPLookup {
 }
 
 function Start-WPMeasure {
+    if ($Demo) { return }
     Start-WPJob 'Measure' {
         foreach ($c in $P.Configs) {
             if (Test-WPCancel) { break }
@@ -1081,7 +1099,7 @@ function Set-WPConfigs {
     foreach ($c in $state.Configs) {
         $state.ConfigIndex[$c.Id] = $c
         if ($state.Settings.ConfigSelections.ContainsKey($c.Id)) { $c.Selected = [bool]$state.Settings.ConfigSelections[$c.Id] }
-        else { $c.Selected = -not $c.Sensitive }
+        else { $c.Selected = (-not $c.Sensitive) -and $c.Bytes -lt 1GB }
         New-WPConfigCard $c
     }
     Update-WPConfigLayout
@@ -1154,9 +1172,9 @@ function Remove-WPCustomConfig {
 
 function Start-WPDetectConfigs {
     Start-WPJob 'Detect' {
-        $configs = Get-WPConfigCandidates $P.Apps $P.CustomConfigs
+        if ($P.Demo) { $configs = Get-WPDemoConfigs } else { $configs = Get-WPConfigCandidates $P.Apps $P.CustomConfigs }
         @{ Configs = $configs }
-    } @{ Apps = @($state.Apps); CustomConfigs = @($state.Settings.CustomConfigs) } {
+    } @{ Apps = @($state.Apps); CustomConfigs = @($state.Settings.CustomConfigs); Demo = [bool]$Demo } {
         param($r, $err)
         if ($r) { Set-WPConfigs @($r.Configs); Start-WPMeasure }
     }
@@ -1245,6 +1263,7 @@ function Set-WPExtraSelected {
 #region Backup tab -------------------------------------------------------------
 
 function Get-WPNetworkDrives {
+    if ($Demo) { return @([pscustomobject]@{ Letter = 'N'; Unc = '\\NAS\Backups' }, [pscustomobject]@{ Letter = 'M'; Unc = '\\NAS\Media' }) }
     # Read from the registry: an elevated window can't see drives mapped in your normal session.
     foreach ($k in (Get-ChildItem -Path 'HKCU:\Network' -ErrorAction SilentlyContinue)) {
         $remote = (Get-ItemProperty -LiteralPath $k.PSPath -ErrorAction SilentlyContinue).RemotePath
@@ -1267,7 +1286,8 @@ function Set-WPDestChips {
         $leaf = @($d.Unc.TrimEnd('\') -split '\\' | Where-Object { $_ })[-1]
         $chips += @{ Text = "$($d.Letter):  $leaf"; Path = $d.Unc.TrimEnd('\') + '\WinPrestige Backup'; Tip = $d.Unc }
     }
-    foreach ($d in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)) {
+    $disks = if ($Demo) { @([pscustomobject]@{ DeviceID = 'D:'; VolumeName = 'Games' }) } else { @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue) }
+    foreach ($d in $disks) {
         if ($d.DeviceID -eq $env:SystemDrive) { continue }
         $chips += @{ Text = "$($d.DeviceID)  $($d.VolumeName)".Trim(); Path = "$($d.DeviceID)\WinPrestige Backup"; Tip = 'Local drive (survives a reset only if you don''t wipe all drives)' }
     }
@@ -1287,6 +1307,7 @@ function Set-WPDestChips {
 
 function Get-WPFreeSpace {
     param([string]$Path)
+    if ($Demo) { return [long]3958241859174 }
     try {
         if ($Path -match '^\\\\') {
             foreach ($d in @(Get-WPNetworkDrives)) {
@@ -1324,7 +1345,9 @@ function Update-WPDestInfo {
     }
     $free = Get-WPFreeSpace $p
     if ($null -ne $free) { $msgs += "$(Format-WPSize $free) free." }
-    if ($CheckExisting) {
+    if ($CheckExisting -and $Demo) {
+        $msgs += "Already has a backup from $((Get-Date).AddDays(-1).ToString('d MMM yyyy')) 21:14. It gets updated: new apps added, removed ones pruned."
+    } elseif ($CheckExisting) {
         try {
             $mf = Join-Path $p 'manifest.json'
             if (Test-Path -LiteralPath $mf) {
@@ -1422,6 +1445,22 @@ function Confirm-WPReachable {
 function Start-WPBackup {
     $dest = $ui.DestBox.Text.Trim().Trim('"')
     if (-not $dest) { [void][System.Windows.MessageBox]::Show($window, 'Choose where to save the backup first.', 'WinPrestige'); $ui.DestBox.Focus(); return }
+    if ($Demo) {
+        $ui.BackupLog.Items.Clear()
+        $state.LogTarget = $ui.BackupLog
+        $demoOpts = @{ Installers = $true; Configs = [bool]$ui.OptConfigs.IsChecked; Extras = [bool]$ui.OptExtras.IsChecked; Prune = [bool]$ui.OptPrune.IsChecked }
+        Start-WPJob 'Backup' {
+            Invoke-WPDemoBackup $P.Apps $P.Configs $P.Extras $P.Destination $P.Options
+        } @{ Apps = @($state.Apps); Configs = @($state.Configs); Extras = @($state.Extras); Destination = $dest; Options = $demoOpts } {
+            param($r, $err)
+            if ($r -and $r.Report) {
+                $state.LastReport = [string]$r.Report
+                Set-WPStatus 'Backup saved. 1 download failed; the restore installs it with winget online.'
+            }
+            foreach ($a in $state.Apps) { Update-WPAppRow $a }
+        }
+        return
+    }
     $dest = ConvertTo-WPUncPath $dest
     $ui.DestBox.Text = $dest
     $root = [IO.Path]::GetPathRoot($dest)
@@ -1546,6 +1585,7 @@ function Import-WPBackup {
     if (-not $path) { return }
     $path = ConvertTo-WPUncPath $path
     $ui.RestorePath.Text = $path
+    if ($Demo) { $m = Get-WPDemoManifest } else {
     $mf = Join-Path $path 'manifest.json'
     $found = $false
     try { $found = Test-Path -LiteralPath $mf } catch { }
@@ -1560,6 +1600,7 @@ function Import-WPBackup {
     try { $m = Read-WPJson $mf } catch {
         $ui.RestoreInfo.Text = "Couldn't read the backup: $($_.Exception.Message)"
         return
+    }
     }
     $state.Restore = $m
     $state.RestoreRoot = $path
@@ -1654,7 +1695,7 @@ function Start-WPRestore {
     $configs = @($state.Restore.configs | Where-Object { $state.RestoreSel['config:' + $_.Id] })
     $extras = @($state.Restore.extras | Where-Object { $state.RestoreSel['extra:' + $_.Id] })
     $test = [bool]$ui.OptTestRun.IsChecked
-    if (-not $test) {
+    if (-not $test -and -not $Screenshot) {
         $ans = [System.Windows.MessageBox]::Show($window, "Install $($entries.Count) apps, then restore $($configs.Count) app settings and $($extras.Count) extras?`n`nInstallers run one after another. Leave the PC alone until it finishes; some may still show a window.", 'WinPrestige', 'OKCancel', 'Question')
         if ($ans -ne 'OK') { return }
     }
@@ -1667,10 +1708,11 @@ function Start-WPRestore {
         OnlineFallback = [bool]$ui.OptOnlineFallback.IsChecked; Silent = [bool]$ui.OptSilent.IsChecked
     }
     Start-WPJob 'Restore' {
-        Invoke-WPRestore $P.Root $P.Entries $P.Configs $P.Extras $P.Dependencies $P.Options
-    } @{ Root = $state.RestoreRoot; Entries = $entries; Configs = $configs; Extras = $extras; Dependencies = @($state.Restore.dependencies); Options = $opts } {
+        if ($P.Demo) { Invoke-WPDemoRestore $P.Root $P.Entries $P.Configs $P.Extras $P.Dependencies $P.Options }
+        else { Invoke-WPRestore $P.Root $P.Entries $P.Configs $P.Extras $P.Dependencies $P.Options }
+    } @{ Root = $state.RestoreRoot; Entries = $entries; Configs = $configs; Extras = $extras; Dependencies = @($state.Restore.dependencies); Options = $opts; Demo = [bool]$Demo } {
         param($r, $err)
-        if ($r -and -not $state.RestoreTestRun) {
+        if ($r -and -not $state.RestoreTestRun -and -not $Screenshot) {
             $msg = "Restore finished: $($r.Ok) installed, $($r.Skipped) already there, $($r.Manual) manual, $($r.Failed) failed."
             Set-WPStatus $msg
             [void][System.Windows.MessageBox]::Show($window, "$msg`n`nUse 'Open manual links' for the rest, then restart the PC so drivers and hardware apps pick up their settings.", 'WinPrestige')
@@ -1680,6 +1722,7 @@ function Start-WPRestore {
 
 function Open-WPManualLinks {
     if (-not $state.Restore) { return }
+    if ($Demo) { Set-WPStatus 'Demo mode: this opens the download page for each manual app.'; return }
     $list = @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and @('manual', 'storelink') -contains $_.Method })
     if ($list.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Nothing ticked needs a manual download.', 'WinPrestige'); return }
     $ans = [System.Windows.MessageBox]::Show($window, "Open $($list.Count) download pages in your browser?", 'WinPrestige', 'OKCancel', 'Question')
@@ -1693,6 +1736,7 @@ function Open-WPManualLinks {
 
 function Start-WPQueueGames {
     if (-not $state.Restore) { return }
+    if ($Demo) { Set-WPStatus 'Demo mode: this opens a Steam install window for each ticked game.'; return }
     $games = @($state.Restore.apps | Where-Object { $_.Category -eq 'games' -and $_.GameUri -and $state.RestoreSel[$_.Key] })
     if ($games.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Tick the games you want in the Games group first.', 'WinPrestige'); return }
     $ans = [System.Windows.MessageBox]::Show($window, "Steam opens an install window for each of the $($games.Count) games, one after another. Steam needs to be installed and signed in.`n`nContinue?", 'WinPrestige', 'OKCancel', 'Question')
@@ -1801,11 +1845,13 @@ $ui.BtnBrowseDest.Add_Click({
 $ui.DestBox.Add_LostFocus({ Update-WPDestInfo -CheckExisting })
 $ui.BtnStartBackup.Add_Click({ Start-WPBackup })
 $ui.BtnOpenDest.Add_Click({
+        if ($Demo) { Set-WPStatus 'Demo mode: the backup folder only exists in the demo.'; return }
         $p = $ui.DestBox.Text.Trim()
         if ($p -and (Test-Path -LiteralPath $p)) { Start-Process explorer.exe "`"$p`"" }
     })
 $ui.BtnOpenReport.Add_Click({
         $r = $state.LastReport
+        if (-not $r -and $Demo) { Set-WPStatus 'Run the demo backup first to see the report.'; return }
         if (-not $r) { $r = Join-Path $ui.DestBox.Text.Trim() 'AppInventory.html' }
         if (Test-Path -LiteralPath $r) { Open-WPUrl $r } else { Set-WPStatus 'No report yet. Run a backup first.' }
     })
@@ -1823,6 +1869,10 @@ $ui.BtnStartRestore.Add_Click({ Start-WPRestore })
 $ui.BtnManualLinks.Add_Click({ Open-WPManualLinks })
 $ui.BtnQueueGames.Add_Click({ Start-WPQueueGames })
 $ui.BtnOpenRestoreReport.Add_Click({
+        if ($Demo) {
+            if ($state.LastReport) { Open-WPUrl $state.LastReport } else { Set-WPStatus 'Run the demo backup first to see the report.' }
+            return
+        }
         if ($state.RestoreRoot) {
             $r = Join-Path $state.RestoreRoot 'AppInventory.html'
             if (Test-Path -LiteralPath $r) { Open-WPUrl $r }
@@ -1876,6 +1926,7 @@ $window.Add_Loaded({
         if (-not $restorePath -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $WPRoot) 'manifest.json'))) { $restorePath = Split-Path -Parent $WPRoot }
         if (-not $restorePath -and $state.Settings.Destination) { $restorePath = $state.Settings.Destination }
         $ui.RestorePath.Text = $restorePath
+        if ($Demo -and $Mode -ne 'Restore') { Import-WPBackup '\\NAS\Backups\WinPrestige Backup' }
         if (-not $script:WP.Winget) { Set-WPStatus 'winget was not found. Update "App Installer" from the Microsoft Store for the best results.' }
         $timer.Start()
         if ($Mode -eq 'Restore') {
@@ -1884,7 +1935,7 @@ $window.Add_Loaded({
             if ($restorePath) { Import-WPBackup $restorePath }
         } else {
             $cached = $null
-            try { $cached = @(Read-WPJson (Join-Path $script:WP.StateDir 'last-scan.json')) } catch { }
+            if (-not $Demo) { try { $cached = @(Read-WPJson (Join-Path $script:WP.StateDir 'last-scan.json')) } catch { } }
             if ($cached -and $cached.Count) {
                 Set-WPAppsFromScan $cached
                 $ui.ScanInfo.Text = "Showing your last scan while this one runs$Ellipsis"
@@ -1906,10 +1957,21 @@ if ($Screenshot) {
             $elapsed = ((Get-Date) - $state.ShotStart).TotalSeconds
             if ($elapsed -lt 4) { return }
             if ($state.Jobs.Count -gt 0 -and $elapsed -lt $ScreenshotWait) { return }
+            if ($ScreenshotAction -and -not $state.ShotActionDone) {
+                $state.ShotActionDone = $true
+                if ($ScreenshotAction -eq 'Backup') { $ui.TabBackup.IsChecked = $true; Start-WPBackup }
+                else { $ui.TabRestore.IsChecked = $true; Start-WPRestore }
+                return
+            }
             $shotTimer.Stop()
             $ui["Tab$ScreenshotTab"].IsChecked = $true
             $window.UpdateLayout()
             switch ($ScreenshotTab) { 'Apps' { Update-WPAppLayout } 'Configs' { Update-WPConfigLayout } 'Restore' { Update-WPRestoreLayout } }
+            if ($ScreenshotSelect) {
+                $pick = $state.Apps | Where-Object { $_.Name -eq $ScreenshotSelect } | Select-Object -First 1
+                if ($pick) { Show-WPDetails $pick.Key }
+            }
+            if ($ScreenshotTab -eq 'Backup') { $window.Height = 1200; $window.UpdateLayout() }
 
             $window.UpdateLayout()
             $w = [int]$window.ActualWidth; $h = [int]$window.ActualHeight

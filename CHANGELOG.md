@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Settings folders over 1 GB now start unticked as intended. Before, they were ticked when their size was already known.
+- Demo mode (`WinPrestige.exe -Demo`): a made-up PC for screenshots and videos. Nothing on your PC is read or changed.
+- README screenshots.
+- Wording fix in restore messages.
+
 ## 1.0.0
 
 First release.

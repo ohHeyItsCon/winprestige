@@ -7,6 +7,10 @@
 <p align="center"><b>Reset Windows. Keep your stuff.</b><br>
 Back up your apps, their installers and their settings before a reset, then put everything back with one click.</p>
 
+<p align="center">
+  <img src="assets/screenshots/apps.png" width="900" alt="WinPrestige Apps tab: installed apps sorted into categories, each tagged with where its installer comes from">
+</p>
+
 ---
 
 Reinstalling Windows is easy. Rebuilding your setup afterwards isn't: remembering every app, finding the real download pages, and redoing your OBS scenes, fan curves and Stream Deck profiles. WinPrestige does that for you.
@@ -21,6 +25,12 @@ Reinstalling Windows is easy. Rebuilding your setup afterwards isn't: rememberin
 - **Writes a report** (`AppInventory.html`) listing every app, how it comes back, and its official download link.
 
 Everything runs on your PC. WinPrestige has no account, no telemetry, and sends nothing anywhere except the downloads you ask for.
+
+## Screenshots
+
+| App settings | Backup | Restore |
+| --- | --- | --- |
+| <img src="assets/screenshots/settings.png" alt="App settings tab listing settings folders for OBS, Stream Deck, iCUE and more"> | <img src="assets/screenshots/backup.png" alt="Backup tab after a finished backup to a NAS share"> | <img src="assets/screenshots/restore.png" alt="Restore tab reinstalling apps and settings from a backup"> |
 
 ## Download
 

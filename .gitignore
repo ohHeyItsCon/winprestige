@@ -5,3 +5,6 @@
 # Local test backups
 *Backup/
 manifest.json
+
+# Local demo launcher
+/WinPrestige Demo.cmd
