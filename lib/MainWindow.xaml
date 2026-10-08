@@ -1,23 +1,40 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WinPrestige" Width="1320" Height="840" MinWidth="980" MinHeight="620"
+        Title="WinPrestige" Width="1320" Height="840" MinWidth="1080" MinHeight="640"
         WindowStartupLocation="CenterScreen" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
-        Background="#16181C" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+        Background="#0A0F1A" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
   <Window.Resources>
-    <SolidColorBrush x:Key="Bg" Color="#16181C"/>
-    <SolidColorBrush x:Key="Panel" Color="#1D2025"/>
-    <SolidColorBrush x:Key="Panel2" Color="#252930"/>
-    <SolidColorBrush x:Key="Hover" Color="#2C313A"/>
-    <SolidColorBrush x:Key="Line" Color="#30353F"/>
-    <SolidColorBrush x:Key="Text" Color="#E6E8EB"/>
-    <SolidColorBrush x:Key="Muted" Color="#8B93A1"/>
-    <SolidColorBrush x:Key="Accent" Color="#3D8BFD"/>
-    <SolidColorBrush x:Key="AccentHover" Color="#5A9DFF"/>
-    <SolidColorBrush x:Key="AccentSoft" Color="#1B3355"/>
-    <SolidColorBrush x:Key="Good" Color="#3FB950"/>
-    <SolidColorBrush x:Key="Warn" Color="#D29922"/>
-    <SolidColorBrush x:Key="Bad" Color="#F85149"/>
-    <SolidColorBrush x:Key="Purple" Color="#A371F7"/>
+    <!-- Palette, taken from the logo: navy, teal, periwinkle, lilac -->
+    <SolidColorBrush x:Key="Bg" Color="#0A0F1A"/>
+    <SolidColorBrush x:Key="Panel" Color="#0F1726"/>
+    <SolidColorBrush x:Key="Panel2" Color="#152036"/>
+    <SolidColorBrush x:Key="Hover" Color="#1A2740"/>
+    <SolidColorBrush x:Key="Line" Color="#1F2B42"/>
+    <SolidColorBrush x:Key="Text" Color="#E4EDF7"/>
+    <SolidColorBrush x:Key="Muted" Color="#7F8FA9"/>
+    <SolidColorBrush x:Key="Accent" Color="#5FCFE3"/>
+    <SolidColorBrush x:Key="AccentHover" Color="#8ADDEC"/>
+    <SolidColorBrush x:Key="AccentSoft" Color="#12324A"/>
+    <SolidColorBrush x:Key="Ink" Color="#071019"/>
+    <SolidColorBrush x:Key="Good" Color="#3DDC97"/>
+    <SolidColorBrush x:Key="Warn" Color="#F2B24C"/>
+    <SolidColorBrush x:Key="Bad" Color="#F2667A"/>
+    <SolidColorBrush x:Key="Purple" Color="#C094F0"/>
+    <LinearGradientBrush x:Key="Brand" StartPoint="0,0" EndPoint="1,1">
+      <GradientStop Color="#4CDBDA" Offset="0"/>
+      <GradientStop Color="#7B9CE9" Offset="0.6"/>
+      <GradientStop Color="#C094F0" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="BrandHover" StartPoint="0,0" EndPoint="1,1">
+      <GradientStop Color="#6FE6E5" Offset="0"/>
+      <GradientStop Color="#93B0F0" Offset="0.6"/>
+      <GradientStop Color="#CFA9F5" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="BrandStripe" StartPoint="0,0" EndPoint="1,0">
+      <GradientStop Color="#4CDBDA" Offset="0"/>
+      <GradientStop Color="#7B9CE9" Offset="0.55"/>
+      <GradientStop Color="#C094F0" Offset="1"/>
+    </LinearGradientBrush>
     <FontFamily x:Key="Icons">Segoe Fluent Icons, Segoe MDL2 Assets</FontFamily>
 
     <!-- Thin dark scrollbars -->
@@ -33,7 +50,7 @@
                 <Thumb>
                   <Thumb.Template>
                     <ControlTemplate TargetType="Thumb">
-                      <Border Background="#3A404B" CornerRadius="4" Margin="2"/>
+                      <Border Background="#26344F" CornerRadius="4" Margin="2"/>
                     </ControlTemplate>
                   </Thumb.Template>
                 </Thumb>
@@ -55,7 +72,7 @@
                     <Thumb>
                       <Thumb.Template>
                         <ControlTemplate TargetType="Thumb">
-                          <Border Background="#3A404B" CornerRadius="4" Margin="2"/>
+                          <Border Background="#26344F" CornerRadius="4" Margin="2"/>
                         </ControlTemplate>
                       </Thumb.Template>
                     </Thumb>
@@ -69,25 +86,22 @@
     </Style>
 
     <Style TargetType="ToolTip">
-      <Setter Property="Background" Value="#2A2F37"/>
+      <Setter Property="Background" Value="#18233A"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
-      <Setter Property="Padding" Value="9,6"/>
+      <Setter Property="BorderBrush" Value="#2A3A58"/>
+      <Setter Property="Padding" Value="10,7"/>
       <Setter Property="FontSize" Value="12"/>
     </Style>
 
-    <!-- Header tabs -->
-    <Style x:Key="TabButton" TargetType="RadioButton">
+    <!-- Back up / Restore switch: the gradient pill behind the buttons slides (see Move-WPModeThumb) -->
+    <Style x:Key="ModeButton" TargetType="RadioButton">
       <Setter Property="Foreground" Value="{StaticResource Muted}"/>
-      <Setter Property="FontSize" Value="13.5"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Margin" Value="2,0"/>
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Background" Value="Transparent"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="RadioButton">
-            <Border Background="{TemplateBinding Background}" CornerRadius="6" Padding="15,7">
+            <Border Background="Transparent" CornerRadius="8" Padding="16,7">
               <ContentPresenter VerticalAlignment="Center"/>
             </Border>
           </ControlTemplate>
@@ -95,17 +109,157 @@
       </Setter>
       <Style.Triggers>
         <Trigger Property="IsMouseOver" Value="True">
-          <Setter Property="Background" Value="{StaticResource Hover}"/>
           <Setter Property="Foreground" Value="{StaticResource Text}"/>
         </Trigger>
         <Trigger Property="IsChecked" Value="True">
-          <Setter Property="Background" Value="{StaticResource Accent}"/>
-          <Setter Property="Foreground" Value="White"/>
+          <Setter Property="Foreground" Value="{StaticResource Ink}"/>
         </Trigger>
       </Style.Triggers>
     </Style>
 
+    <!-- Numbered backup steps: the dot fills and the underline grows in -->
+    <Style x:Key="StepButton" TargetType="RadioButton">
+      <Setter Property="Foreground" Value="{StaticResource Muted}"/>
+      <Setter Property="FontSize" Value="13"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="RadioButton">
+            <Grid Background="Transparent">
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="6,0,12,0">
+                <Grid Width="22" Height="22">
+                  <Ellipse Stroke="#34425F" StrokeThickness="1.5"/>
+                  <Ellipse x:Name="dotOn" Fill="{StaticResource Brand}" Opacity="0"/>
+                  <TextBlock x:Name="num" Text="{Binding Tag, RelativeSource={RelativeSource TemplatedParent}}"
+                             FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource Muted}"
+                             HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
+                <ContentPresenter Margin="9,0,0,0" VerticalAlignment="Center"/>
+              </StackPanel>
+              <Border x:Name="bar" Height="2" VerticalAlignment="Bottom" CornerRadius="1" Margin="6,0,12,0"
+                      Background="{StaticResource BrandStripe}" Opacity="0" RenderTransformOrigin="0,0.5">
+                <Border.RenderTransform><ScaleTransform x:Name="barScale" ScaleX="0"/></Border.RenderTransform>
+              </Border>
+            </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="True">
+                <Setter TargetName="num" Property="Foreground" Value="{StaticResource Ink}"/>
+                <Setter Property="Foreground" Value="{StaticResource Text}"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="dotOn" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.18"/>
+                      <DoubleAnimation Storyboard.TargetName="bar" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                      <DoubleAnimation Storyboard.TargetName="barScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.28"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="dotOn" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                      <DoubleAnimation Storyboard.TargetName="bar" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.15"/>
+                      <DoubleAnimation Storyboard.TargetName="barScale" Storyboard.TargetProperty="ScaleX" To="0" Duration="0:0:0.15"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
     <!-- Buttons -->
+    <ControlTemplate x:Key="BtnTemplate" TargetType="Button">
+      <Grid RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform><ScaleTransform x:Name="press"/></Grid.RenderTransform>
+        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8"/>
+        <Border x:Name="hl" Background="White" CornerRadius="8" Opacity="0"/>
+        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0.07" Duration="0:0:0.12"/></Storyboard></BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsPressed" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.07"/>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.07"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.2"><DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.55"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.2"><DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.55"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate>
+    <ControlTemplate x:Key="BtnPrimaryTemplate" TargetType="Button">
+      <Grid RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform><ScaleTransform x:Name="press"/></Grid.RenderTransform>
+        <Border x:Name="glow" CornerRadius="8" Background="{TemplateBinding Background}" Opacity="0" Margin="2,4,2,0">
+          <Border.Effect><BlurEffect Radius="16"/></Border.Effect>
+        </Border>
+        <Border Background="{TemplateBinding Background}" CornerRadius="8"/>
+        <Border x:Name="hl" Background="White" CornerRadius="8" Opacity="0"/>
+        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0.14" Duration="0:0:0.15"/>
+                <DoubleAnimation Storyboard.TargetName="glow" Storyboard.TargetProperty="Opacity" To="0.6" Duration="0:0:0.25"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/>
+                <DoubleAnimation Storyboard.TargetName="glow" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.3"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsPressed" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.07"/>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.07"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.2"><DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.55"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.2"><DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.55"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate>
     <Style x:Key="Btn" TargetType="Button">
       <Setter Property="Background" Value="{StaticResource Panel2}"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
@@ -115,43 +269,32 @@
       <Setter Property="Margin" Value="0,0,0,6"/>
       <Setter Property="HorizontalContentAlignment" Value="Left"/>
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Template">
-        <Setter.Value>
-          <ControlTemplate TargetType="Button">
-            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
-              <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center"/>
-            </Border>
-          </ControlTemplate>
-        </Setter.Value>
-      </Setter>
+      <Setter Property="Template" Value="{StaticResource BtnTemplate}"/>
       <Style.Triggers>
-        <Trigger Property="IsMouseOver" Value="True">
-          <Setter Property="Background" Value="{StaticResource Hover}"/>
-        </Trigger>
-        <Trigger Property="IsPressed" Value="True">
-          <Setter Property="Background" Value="{StaticResource Line}"/>
-        </Trigger>
         <Trigger Property="IsEnabled" Value="False">
           <Setter Property="Opacity" Value="0.45"/>
+        </Trigger>
+      </Style.Triggers>
+    </Style>
+    <Style x:Key="BtnGhost" TargetType="Button" BasedOn="{StaticResource Btn}">
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Padding" Value="10,8"/>
+      <Setter Property="Margin" Value="0,0,0,2"/>
+      <Setter Property="Foreground" Value="#C5D1E3"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="Foreground" Value="{StaticResource Text}"/>
         </Trigger>
       </Style.Triggers>
     </Style>
     <Style x:Key="BtnPrimary" TargetType="Button" BasedOn="{StaticResource Btn}">
-      <Setter Property="Background" Value="{StaticResource Accent}"/>
-      <Setter Property="BorderBrush" Value="{StaticResource Accent}"/>
-      <Setter Property="Foreground" Value="White"/>
+      <Setter Property="Background" Value="{StaticResource Brand}"/>
+      <Setter Property="BorderThickness" Value="0"/>
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-      <Style.Triggers>
-        <Trigger Property="IsMouseOver" Value="True">
-          <Setter Property="Background" Value="{StaticResource AccentHover}"/>
-        </Trigger>
-        <Trigger Property="IsEnabled" Value="False">
-          <Setter Property="Opacity" Value="0.45"/>
-        </Trigger>
-      </Style.Triggers>
-    </Style>
-    <Style x:Key="BtnLink" TargetType="Button">
+      <Setter Property="Template" Value="{StaticResource BtnPrimaryTemplate}"/>
+    </Style>    <Style x:Key="BtnLink" TargetType="Button">
       <Setter Property="Foreground" Value="{StaticResource Accent}"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Setter Property="Margin" Value="0,0,12,0"/>
@@ -171,7 +314,7 @@
       </Style.Triggers>
     </Style>
 
-    <!-- Checkbox: rounded square with a tick -->
+    <!-- Checkbox: the gradient fades in and the tick pops; a dash when only some are ticked -->
     <Style x:Key="Chk" TargetType="CheckBox">
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="Cursor" Value="Hand"/>
@@ -180,21 +323,61 @@
         <Setter.Value>
           <ControlTemplate TargetType="CheckBox">
             <StackPanel Orientation="Horizontal" Background="Transparent">
-              <Border x:Name="box" Width="17" Height="17" CornerRadius="4" BorderThickness="1.5"
-                      BorderBrush="#5B6372" Background="Transparent" VerticalAlignment="Center">
-                <Path x:Name="tick" Data="M 3.5 8.5 L 7 12 L 13.5 4.5" Stroke="White" StrokeThickness="2"
-                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Visibility="Collapsed"/>
-              </Border>
+              <Grid Width="18" Height="18" VerticalAlignment="Center">
+                <Border x:Name="box" CornerRadius="5" BorderThickness="1.5" BorderBrush="#3A4A68"/>
+                <Border x:Name="fillOn" CornerRadius="5" Background="{StaticResource Brand}" Opacity="0"/>
+                <Border x:Name="fillPart" CornerRadius="5" Background="{StaticResource Brand}" Opacity="0"/>
+                <Path x:Name="tick" Data="M 5 9.5 L 8.3 12.8 L 14 6.5" Stroke="{StaticResource Ink}" StrokeThickness="2.2"
+                      StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" Opacity="0" RenderTransformOrigin="0.5,0.5">
+                  <Path.RenderTransform><ScaleTransform x:Name="tickScale" ScaleX="0.4" ScaleY="0.4"/></Path.RenderTransform>
+                </Path>
+                <Rectangle x:Name="dash" Width="8" Height="2.2" RadiusX="1" RadiusY="1" Fill="{StaticResource Ink}" Opacity="0"/>
+              </Grid>
               <ContentPresenter Margin="9,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
             <ControlTemplate.Triggers>
               <Trigger Property="IsMouseOver" Value="True">
-                <Setter TargetName="box" Property="BorderBrush" Value="#9AA3B2"/>
+                <Setter TargetName="box" Property="BorderBrush" Value="#6A7C9C"/>
               </Trigger>
               <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="box" Property="Background" Value="{StaticResource Accent}"/>
-                <Setter TargetName="box" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                <Setter TargetName="tick" Property="Visibility" Value="Visible"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="fillOn" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                      <DoubleAnimation Storyboard.TargetName="tick" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                      <DoubleAnimation Storyboard.TargetName="tickScale" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.26"><DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.55"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                      <DoubleAnimation Storyboard.TargetName="tickScale" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.26"><DoubleAnimation.EasingFunction><BackEase EasingMode="EaseOut" Amplitude="0.55"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="fillOn" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.14"/>
+                      <DoubleAnimation Storyboard.TargetName="tick" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
+                      <DoubleAnimation Storyboard.TargetName="tickScale" Storyboard.TargetProperty="ScaleX" To="0.4" Duration="0:0:0.14"/>
+                      <DoubleAnimation Storyboard.TargetName="tickScale" Storyboard.TargetProperty="ScaleY" To="0.4" Duration="0:0:0.14"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
+              </Trigger>
+              <Trigger Property="IsChecked" Value="{x:Null}">
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="fillPart" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                      <DoubleAnimation Storyboard.TargetName="dash" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.12"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="fillPart" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.12"/>
+                      <DoubleAnimation Storyboard.TargetName="dash" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.1"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4"/>
@@ -205,26 +388,45 @@
       </Setter>
     </Style>
 
-    <!-- Toggle switch (label left, switch right) -->
+    <!-- Toggle switch (label left, switch right): the knob slides and the gradient fades in -->
     <Style x:Key="Switch" TargetType="CheckBox">
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Margin" Value="0,4"/>
+      <Setter Property="Margin" Value="0,5"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="CheckBox">
             <DockPanel Background="Transparent" LastChildFill="True">
-              <Border x:Name="track" DockPanel.Dock="Right" Width="38" Height="20" CornerRadius="10"
-                      Background="#3A404B" VerticalAlignment="Center" Margin="10,0,0,0">
-                <Ellipse x:Name="knob" Width="14" Height="14" Fill="#C9CED6" HorizontalAlignment="Left" Margin="3,0"/>
-              </Border>
+              <Grid DockPanel.Dock="Right" Width="40" Height="22" Margin="12,0,0,0" VerticalAlignment="Center">
+                <Border CornerRadius="11" Background="#24324C"/>
+                <Border x:Name="on" CornerRadius="11" Background="{StaticResource Brand}" Opacity="0"/>
+                <Ellipse Width="16" Height="16" HorizontalAlignment="Left" Margin="3,0,0,0">
+                  <Ellipse.Fill><SolidColorBrush x:Name="knobFill" Color="#9AA8C0"/></Ellipse.Fill>
+                  <Ellipse.RenderTransform><TranslateTransform x:Name="knobMove" X="0"/></Ellipse.RenderTransform>
+                </Ellipse>
+              </Grid>
               <ContentPresenter VerticalAlignment="Center"/>
             </DockPanel>
             <ControlTemplate.Triggers>
               <Trigger Property="IsChecked" Value="True">
-                <Setter TargetName="track" Property="Background" Value="{StaticResource Accent}"/>
-                <Setter TargetName="knob" Property="HorizontalAlignment" Value="Right"/>
-                <Setter TargetName="knob" Property="Fill" Value="White"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="knobMove" Storyboard.TargetProperty="X" To="18" Duration="0:0:0.22"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                      <DoubleAnimation Storyboard.TargetName="on" Storyboard.TargetProperty="Opacity" To="1" Duration="0:0:0.2"/>
+                      <ColorAnimation Storyboard.TargetName="knobFill" Storyboard.TargetProperty="Color" To="White" Duration="0:0:0.2"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <BeginStoryboard>
+                    <Storyboard>
+                      <DoubleAnimation Storyboard.TargetName="knobMove" Storyboard.TargetProperty="X" To="0" Duration="0:0:0.22"><DoubleAnimation.EasingFunction><CubicEase EasingMode="EaseOut"/></DoubleAnimation.EasingFunction></DoubleAnimation>
+                      <DoubleAnimation Storyboard.TargetName="on" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/>
+                      <ColorAnimation Storyboard.TargetName="knobFill" Storyboard.TargetProperty="Color" To="#9AA8C0" Duration="0:0:0.2"/>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.ExitActions>
               </Trigger>
               <Trigger Property="IsEnabled" Value="False">
                 <Setter Property="Opacity" Value="0.4"/>
@@ -234,20 +436,19 @@
         </Setter.Value>
       </Setter>
     </Style>
-
     <Style x:Key="Field" TargetType="TextBox">
       <Setter Property="Background" Value="{StaticResource Panel2}"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
       <Setter Property="CaretBrush" Value="{StaticResource Text}"/>
       <Setter Property="SelectionBrush" Value="{StaticResource Accent}"/>
-      <Setter Property="Padding" Value="8,6"/>
+      <Setter Property="Padding" Value="9,7"/>
       <Setter Property="VerticalContentAlignment" Value="Center"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="TextBox">
             <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="1" CornerRadius="6">
+                    BorderThickness="1" CornerRadius="8">
               <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
             </Border>
             <ControlTemplate.Triggers>
@@ -262,9 +463,9 @@
 
     <Style x:Key="Row" TargetType="Border">
       <Setter Property="Background" Value="Transparent"/>
-      <Setter Property="CornerRadius" Value="5"/>
-      <Setter Property="Padding" Value="8,0,6,0"/>
-      <Setter Property="Height" Value="28"/>
+      <Setter Property="CornerRadius" Value="8"/>
+      <Setter Property="Padding" Value="6,0,8,0"/>
+      <Setter Property="Height" Value="34"/>
       <Setter Property="Cursor" Value="Hand"/>
       <Style.Triggers>
         <Trigger Property="IsMouseOver" Value="True">
@@ -277,16 +478,21 @@
       <Setter Property="Background" Value="{StaticResource Panel}"/>
       <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
       <Setter Property="BorderThickness" Value="1"/>
-      <Setter Property="CornerRadius" Value="10"/>
-      <Setter Property="Padding" Value="16,14"/>
+      <Setter Property="CornerRadius" Value="12"/>
+      <Setter Property="Padding" Value="18,16"/>
       <Setter Property="Margin" Value="0,0,0,12"/>
+      <Style.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Setter Property="BorderBrush" Value="#2C3D5E"/>
+        </Trigger>
+      </Style.Triggers>
     </Style>
 
     <Style x:Key="SideLabel" TargetType="TextBlock">
       <Setter Property="Foreground" Value="{StaticResource Muted}"/>
       <Setter Property="FontSize" Value="11"/>
       <Setter Property="FontWeight" Value="SemiBold"/>
-      <Setter Property="Margin" Value="2,16,0,8"/>
+      <Setter Property="Margin" Value="10,18,0,6"/>
     </Style>
 
     <Style x:Key="Thin" TargetType="ProgressBar">
@@ -294,30 +500,50 @@
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ProgressBar">
-            <Grid>
+            <Grid ClipToBounds="True">
               <Border x:Name="PART_Track" CornerRadius="3" Background="{StaticResource Line}"/>
-              <Border x:Name="PART_Indicator" CornerRadius="3" Background="{StaticResource Accent}" HorizontalAlignment="Left"/>
+              <Border x:Name="PART_Indicator" CornerRadius="3" Background="{StaticResource BrandStripe}" HorizontalAlignment="Left"/>
+              <Border x:Name="shimmer" Width="90" CornerRadius="3" HorizontalAlignment="Left" Background="{StaticResource BrandStripe}" Visibility="Collapsed">
+                <Border.RenderTransform><TranslateTransform x:Name="shimmerMove" X="-90"/></Border.RenderTransform>
+              </Border>
             </Grid>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsIndeterminate" Value="True">
+                <Setter TargetName="PART_Indicator" Property="Visibility" Value="Collapsed"/>
+                <Setter TargetName="shimmer" Property="Visibility" Value="Visible"/>
+                <Trigger.EnterActions>
+                  <BeginStoryboard x:Name="shimmerRun">
+                    <Storyboard RepeatBehavior="Forever">
+                      <DoubleAnimation Storyboard.TargetName="shimmerMove" Storyboard.TargetProperty="X" From="-90" To="250" Duration="0:0:1.2">
+                        <DoubleAnimation.EasingFunction><SineEase EasingMode="EaseInOut"/></DoubleAnimation.EasingFunction>
+                      </DoubleAnimation>
+                    </Storyboard>
+                  </BeginStoryboard>
+                </Trigger.EnterActions>
+                <Trigger.ExitActions>
+                  <StopStoryboard BeginStoryboardName="shimmerRun"/>
+                </Trigger.ExitActions>
+              </Trigger>
+            </ControlTemplate.Triggers>
           </ControlTemplate>
         </Setter.Value>
       </Setter>
     </Style>
-
     <Style x:Key="LogList" TargetType="ListBox">
-      <Setter Property="Background" Value="#121417"/>
+      <Setter Property="Background" Value="#080C15"/>
       <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
       <Setter Property="BorderThickness" Value="1"/>
       <Setter Property="Foreground" Value="{StaticResource Text}"/>
       <Setter Property="FontFamily" Value="Cascadia Mono, Consolas"/>
       <Setter Property="FontSize" Value="12"/>
-      <Setter Property="Padding" Value="6"/>
+      <Setter Property="Padding" Value="8"/>
       <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
       <Setter Property="VirtualizingPanel.IsVirtualizing" Value="True"/>
       <Setter Property="Template">
         <Setter.Value>
           <ControlTemplate TargetType="ListBox">
             <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
               <ScrollViewer Padding="{TemplateBinding Padding}" Focusable="False">
                 <ItemsPresenter/>
               </ScrollViewer>
@@ -344,96 +570,134 @@
   <Grid TextElement.Foreground="{StaticResource Text}">
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
 
-    <!-- Header -->
-    <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Padding="16,10">
-      <DockPanel LastChildFill="True">
-        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,22,0">
-          <Grid Width="32" Height="32">
-            <Border CornerRadius="8" Background="{StaticResource Accent}">
-              <TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" FontSize="17" Foreground="White"
-                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
-            </Border>
-            <Image x:Name="LogoImage" Width="32" Height="32" RenderOptions.BitmapScalingMode="HighQuality"/>
-          </Grid>
-          <StackPanel Margin="10,0,0,0" VerticalAlignment="Center">
-            <TextBlock Text="WinPrestige" FontSize="16" FontWeight="Bold"/>
-            <TextBlock Text="Back up, reset, restore" FontSize="11" Foreground="{StaticResource Muted}"/>
+    <!-- Header: logo, Back up / Restore switch, search -->
+    <Border Grid.Row="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1">
+      <Grid>
+        <Border Height="2" VerticalAlignment="Top" Background="{StaticResource BrandStripe}"/>
+        <Grid Margin="18,12,18,10">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+          </Grid.ColumnDefinitions>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Grid Width="36" Height="36">
+              <Border CornerRadius="9" Background="{StaticResource Brand}"/>
+              <Image x:Name="LogoImage" Width="36" Height="36" RenderOptions.BitmapScalingMode="HighQuality"/>
+            </Grid>
+            <StackPanel Margin="11,0,0,0" VerticalAlignment="Center">
+              <TextBlock Text="WinPrestige" FontSize="17" FontWeight="SemiBold"/>
+              <TextBlock Text="Reset Windows. Keep your stuff." FontSize="11.5" Foreground="{StaticResource Muted}"/>
+            </StackPanel>
           </StackPanel>
-        </StackPanel>
-        <Border DockPanel.Dock="Right" Width="270" Height="34" CornerRadius="17" Background="{StaticResource Panel2}"
-                BorderBrush="{StaticResource Line}" BorderThickness="1" VerticalAlignment="Center">
-          <Grid>
-            <TextBlock Text="&#xE721;" FontFamily="{StaticResource Icons}" Foreground="{StaticResource Muted}"
-                       VerticalAlignment="Center" Margin="13,0,0,0" FontSize="13"/>
-            <TextBlock x:Name="SearchHint" Text="Search  (Ctrl+F)" Foreground="{StaticResource Muted}"
-                       VerticalAlignment="Center" Margin="36,0,0,0" IsHitTestVisible="False"/>
-            <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
-                     CaretBrush="{StaticResource Text}" VerticalAlignment="Center" Margin="33,0,12,0"/>
-          </Grid>
-        </Border>
-        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-          <RadioButton x:Name="TabApps" GroupName="tabs" Style="{StaticResource TabButton}" IsChecked="True" Content="Apps"/>
-          <RadioButton x:Name="TabConfigs" GroupName="tabs" Style="{StaticResource TabButton}" Content="App settings"/>
-          <RadioButton x:Name="TabExtras" GroupName="tabs" Style="{StaticResource TabButton}" Content="Extras"/>
-          <RadioButton x:Name="TabBackup" GroupName="tabs" Style="{StaticResource TabButton}" Content="Backup"/>
-          <RadioButton x:Name="TabRestore" GroupName="tabs" Style="{StaticResource TabButton}" Content="Restore"/>
+          <Border Grid.Column="1" Background="{StaticResource Panel2}" CornerRadius="11" Padding="3" VerticalAlignment="Center">
+            <Grid>
+              <Border x:Name="ModeThumb" CornerRadius="8" Background="{StaticResource Brand}" HorizontalAlignment="Left" Width="0">
+                <Border.RenderTransform><TranslateTransform/></Border.RenderTransform>
+              </Border>
+              <StackPanel x:Name="ModeButtons" Orientation="Horizontal">
+                <RadioButton x:Name="ModeBackup" GroupName="mode" Style="{StaticResource ModeButton}" IsChecked="True">
+                  <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE896;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Back up"/></StackPanel>
+                </RadioButton>
+                <RadioButton x:Name="ModeRestore" GroupName="mode" Style="{StaticResource ModeButton}">
+                  <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE777;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Restore"/></StackPanel>
+                </RadioButton>
+              </StackPanel>
+            </Grid>
+          </Border>
+          <Border Grid.Column="2" HorizontalAlignment="Right" Width="260" Height="36" CornerRadius="10" Background="{StaticResource Panel2}"
+                  BorderBrush="{StaticResource Line}" BorderThickness="1" VerticalAlignment="Center">
+            <Grid>
+              <TextBlock Text="&#xE721;" FontFamily="{StaticResource Icons}" Foreground="{StaticResource Muted}"
+                         VerticalAlignment="Center" Margin="13,0,0,0" FontSize="13"/>
+              <TextBlock x:Name="SearchHint" Text="Search  (Ctrl+F)" Foreground="{StaticResource Muted}"
+                         VerticalAlignment="Center" Margin="36,0,0,0" IsHitTestVisible="False"/>
+              <TextBox x:Name="SearchBox" Background="Transparent" BorderThickness="0" Foreground="{StaticResource Text}"
+                       CaretBrush="{StaticResource Text}" VerticalAlignment="Center" Margin="33,0,12,0"/>
+            </Grid>
+          </Border>
+        </Grid>
+      </Grid>
+    </Border>
+
+    <!-- Backup steps -->
+    <Border x:Name="StepBar" Grid.Row="1" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,0,1" Height="46" Padding="12,0">
+      <DockPanel LastChildFill="True">
+        <Button x:Name="BtnNextStep" DockPanel.Dock="Right" Style="{StaticResource BtnGhost}" Margin="0" Padding="12,6" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock x:Name="NextStepText" Text="Next: App settings"/>
+            <TextBlock Text="&#xE72A;" FontFamily="{StaticResource Icons}" Margin="8,2,0,0" FontSize="11"/>
+          </StackPanel>
+        </Button>
+        <StackPanel Orientation="Horizontal">
+          <RadioButton x:Name="TabApps" GroupName="tabs" Style="{StaticResource StepButton}" Tag="1" IsChecked="True" Content="Apps"/>
+          <TextBlock Text="&#xE76C;" FontFamily="{StaticResource Icons}" FontSize="10" Foreground="#34425F" VerticalAlignment="Center" Margin="2,0,8,0"/>
+          <RadioButton x:Name="TabConfigs" GroupName="tabs" Style="{StaticResource StepButton}" Tag="2" Content="App settings"/>
+          <TextBlock Text="&#xE76C;" FontFamily="{StaticResource Icons}" FontSize="10" Foreground="#34425F" VerticalAlignment="Center" Margin="2,0,8,0"/>
+          <RadioButton x:Name="TabExtras" GroupName="tabs" Style="{StaticResource StepButton}" Tag="3" Content="Extras"/>
+          <TextBlock Text="&#xE76C;" FontFamily="{StaticResource Icons}" FontSize="10" Foreground="#34425F" VerticalAlignment="Center" Margin="2,0,8,0"/>
+          <RadioButton x:Name="TabBackup" GroupName="tabs" Style="{StaticResource StepButton}" Tag="4" Content="Save backup"/>
+          <RadioButton x:Name="TabRestore" GroupName="tabs" Visibility="Collapsed"/>
         </StackPanel>
       </DockPanel>
     </Border>
 
-    <Grid Grid.Row="1">
+    <Grid Grid.Row="2">
       <!-- APPS -->
       <Grid x:Name="PageApps">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="228"/>
+          <ColumnDefinition Width="236"/>
           <ColumnDefinition Width="*"/>
-          <ColumnDefinition Width="320"/>
+          <ColumnDefinition Width="324"/>
         </Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="14,14,14,14">
-              <Button x:Name="BtnScan" Style="{StaticResource BtnPrimary}">
+            <StackPanel Margin="14,16,14,16">
+              <Button x:Name="BtnScan" Style="{StaticResource BtnPrimary}" Margin="0,0,0,8" Padding="12,9">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Scan this PC"/></StackPanel>
               </Button>
-              <Button x:Name="BtnLinks" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Look up download links"/></StackPanel>
+              <Button x:Name="BtnLinks" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Look up download links"/></StackPanel>
               </Button>
               <TextBlock Text="SELECT" Style="{StaticResource SideLabel}"/>
-              <Button x:Name="BtnSelRecommended" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE735;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Recommended"/></StackPanel>
+              <Button x:Name="BtnSelRecommended" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE735;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Recommended"/></StackPanel>
               </Button>
-              <Button x:Name="BtnSelAll" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="All shown"/></StackPanel>
+              <Button x:Name="BtnSelAll" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="All shown"/></StackPanel>
               </Button>
-              <Button x:Name="BtnSelNone" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE894;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Clear selection"/></StackPanel>
+              <Button x:Name="BtnSelNone" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE894;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Clear selection"/></StackPanel>
               </Button>
               <TextBlock Text="SHOW" Style="{StaticResource SideLabel}"/>
-              <CheckBox x:Name="ShowGames" Style="{StaticResource Switch}" Content="Games"/>
-              <CheckBox x:Name="ShowSystem" Style="{StaticResource Switch}" Content="Windows built-ins"/>
-              <CheckBox x:Name="ShowSelectedOnly" Style="{StaticResource Switch}" Content="Selected only"/>
-              <TextBlock Text="SUMMARY" Style="{StaticResource SideLabel}"/>
-              <Border Background="{StaticResource Panel2}" CornerRadius="8" Padding="12,10">
+              <StackPanel Margin="10,0,4,0">
+                <CheckBox x:Name="ShowGames" Style="{StaticResource Switch}" Content="Games"/>
+                <CheckBox x:Name="ShowSystem" Style="{StaticResource Switch}" Content="Windows built-ins"/>
+                <CheckBox x:Name="ShowSelectedOnly" Style="{StaticResource Switch}" Content="Selected only"/>
+              </StackPanel>
+              <Border Background="{StaticResource Panel2}" CornerRadius="12" Padding="14,13" Margin="0,18,0,0">
                 <StackPanel x:Name="AppSummary"/>
               </Border>
-              <TextBlock x:Name="ScanInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="2,10,0,0"/>
+              <TextBlock x:Name="ScanInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,10,0,0"/>
             </StackPanel>
           </ScrollViewer>
         </Border>
         <ScrollViewer x:Name="AppScroll" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-          <Grid x:Name="AppColumns" Margin="16,8,12,16"/>
+          <Grid x:Name="AppColumns" Margin="18,6,14,18"/>
         </ScrollViewer>
         <StackPanel x:Name="AppEmpty" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">
-          <TextBlock Text="&#xE9F5;" FontFamily="{StaticResource Icons}" FontSize="36" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"/>
+          <ContentControl x:Name="AppSpinner" Width="40" Height="40" HorizontalAlignment="Center"/>
+          <TextBlock x:Name="AppEmptyIcon" Text="&#xE9F5;" FontFamily="{StaticResource Icons}" FontSize="36" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Visibility="Collapsed"/>
           <TextBlock x:Name="AppEmptyText" Text="Scanning your apps..." Foreground="{StaticResource Muted}" FontSize="14" Margin="0,12,0,0" HorizontalAlignment="Center"/>
         </StackPanel>
         <Border Grid.Column="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="1,0,0,0">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel x:Name="Details" Margin="18,16,18,16"/>
+            <StackPanel x:Name="Details" Margin="20,18,20,18"/>
           </ScrollViewer>
         </Border>
       </Grid>
@@ -441,49 +705,48 @@
       <!-- APP SETTINGS -->
       <Grid x:Name="PageConfigs" Visibility="Collapsed">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="228"/>
+          <ColumnDefinition Width="236"/>
           <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="14">
-              <Button x:Name="BtnDetectConfigs" Style="{StaticResource BtnPrimary}">
+            <StackPanel Margin="14,16,14,16">
+              <Button x:Name="BtnDetectConfigs" Style="{StaticResource BtnPrimary}" Margin="0,0,0,8" Padding="12,9">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Detect again"/></StackPanel>
               </Button>
-              <Button x:Name="BtnAddFolder" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F4;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Add a folder..."/></StackPanel>
+              <Button x:Name="BtnAddFolder" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8F4;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Add a folder..."/></StackPanel>
               </Button>
-              <Button x:Name="BtnAddFile" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Add a file..."/></StackPanel>
+              <Button x:Name="BtnAddFile" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A5;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Add a file..."/></StackPanel>
               </Button>
               <TextBlock Text="SELECT" Style="{StaticResource SideLabel}"/>
-              <Button x:Name="BtnCfgRecommended" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE735;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Recommended"/></StackPanel>
+              <Button x:Name="BtnCfgRecommended" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE735;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Recommended"/></StackPanel>
               </Button>
-              <Button x:Name="BtnCfgAll" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="All"/></StackPanel>
+              <Button x:Name="BtnCfgAll" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE762;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="All"/></StackPanel>
               </Button>
-              <Button x:Name="BtnCfgNone" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE894;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Clear selection"/></StackPanel>
+              <Button x:Name="BtnCfgNone" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE894;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Clear selection"/></StackPanel>
               </Button>
-              <TextBlock Text="SUMMARY" Style="{StaticResource SideLabel}"/>
-              <Border Background="{StaticResource Panel2}" CornerRadius="8" Padding="12,10">
+              <Border Background="{StaticResource Panel2}" CornerRadius="12" Padding="14,13" Margin="0,18,0,0">
                 <StackPanel x:Name="ConfigSummary"/>
               </Border>
-              <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="2,10,0,0"
+              <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,10,0,0"
                          Text="Each app's settings get their own folder in the backup, with a Restore-Config.cmd that puts them back after you reinstall the app."/>
             </StackPanel>
           </ScrollViewer>
         </Border>
         <ScrollViewer x:Name="ConfigScroll" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-          <Grid x:Name="ConfigColumns" Margin="16,14,12,16"/>
+          <Grid x:Name="ConfigColumns" Margin="18,16,14,18"/>
         </ScrollViewer>
       </Grid>
 
       <!-- EXTRAS -->
       <ScrollViewer x:Name="PageExtras" Visibility="Collapsed" VerticalScrollBarVisibility="Auto">
-        <StackPanel MaxWidth="860" Margin="24,20,24,24">
-          <TextBlock Text="Extras" FontSize="20" FontWeight="SemiBold"/>
+        <StackPanel MaxWidth="860" Margin="24,22,24,24">
+          <TextBlock Text="Extras" FontSize="21" FontWeight="SemiBold"/>
           <TextBlock Text="Things a reset wipes that aren't apps. Turn on what you want in the backup." Foreground="{StaticResource Muted}" Margin="0,4,0,16"/>
           <StackPanel x:Name="ExtrasList"/>
         </StackPanel>
@@ -492,20 +755,20 @@
       <!-- BACKUP -->
       <Grid x:Name="PageBackup" Visibility="Collapsed">
         <ScrollViewer x:Name="BackupScroll" VerticalScrollBarVisibility="Auto">
-          <StackPanel MaxWidth="980" Margin="24,20,24,24">
+          <StackPanel MaxWidth="980" Margin="24,22,24,24">
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="Where to save the backup" FontSize="15" FontWeight="SemiBold"/>
                 <TextBlock Text="Pick a folder on your NAS (or any drive the reset won't wipe). Running the backup again updates it in place."
-                           Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,10"/>
+                           Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,12"/>
                 <DockPanel>
-                  <Button x:Name="BtnBrowseDest" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="8,0,0,0" Padding="14,7">
+                  <Button x:Name="BtnBrowseDest" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="8,0,0,0" Padding="14,8">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Browse"/></StackPanel>
                   </Button>
                   <TextBox x:Name="DestBox" Style="{StaticResource Field}" FontFamily="Cascadia Mono, Consolas"/>
                 </DockPanel>
-                <WrapPanel x:Name="DestChips" Margin="0,8,0,0"/>
-                <TextBlock x:Name="DestInfo" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{StaticResource Muted}"/>
+                <WrapPanel x:Name="DestChips" Margin="0,10,0,0"/>
+                <TextBlock x:Name="DestInfo" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource Muted}"/>
               </StackPanel>
             </Border>
             <Border Style="{StaticResource Card}">
@@ -515,7 +778,7 @@
                   <StackPanel><TextBlock Text="Download installers"/><TextBlock Text="Latest official installers from winget, plus any download links you added." Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel>
                 </CheckBox>
                 <CheckBox x:Name="OptConfigs" Style="{StaticResource Switch}" IsChecked="True">
-                  <StackPanel><TextBlock Text="Back up app settings"/><TextBlock Text="Everything ticked on the App settings tab." Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel>
+                  <StackPanel><TextBlock Text="Back up app settings"/><TextBlock Text="Everything ticked on the App settings step." Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel>
                 </CheckBox>
                 <CheckBox x:Name="OptExtras" Style="{StaticResource Switch}" IsChecked="True">
                   <StackPanel><TextBlock Text="Back up extras"/><TextBlock Text="Fonts, environment variables and anything else turned on in Extras." Foreground="{StaticResource Muted}" FontSize="12"/></StackPanel>
@@ -533,7 +796,7 @@
             </Border>
             <Border Style="{StaticResource Card}">
               <StackPanel>
-                <TextBlock Text="Summary" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                <TextBlock Text="Summary" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,10"/>
                 <WrapPanel x:Name="BackupStats"/>
                 <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                   <Button x:Name="BtnStartBackup" Style="{StaticResource BtnPrimary}" Padding="22,10" Margin="0,0,8,0">
@@ -556,13 +819,13 @@
       <!-- RESTORE -->
       <Grid x:Name="PageRestore" Visibility="Collapsed">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="268"/>
+          <ColumnDefinition Width="276"/>
           <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
         <Border Grid.Column="0" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,0,1,0">
           <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel Margin="14">
-              <TextBlock Text="BACKUP FOLDER" Style="{StaticResource SideLabel}" Margin="2,0,0,8"/>
+            <StackPanel Margin="14,16,14,16">
+              <TextBlock Text="BACKUP FOLDER" Style="{StaticResource SideLabel}" Margin="4,0,0,8"/>
               <TextBox x:Name="RestorePath" Style="{StaticResource Field}" FontFamily="Cascadia Mono, Consolas" FontSize="12"/>
               <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                 <Button x:Name="BtnBrowseRestore" Style="{StaticResource Btn}" Margin="0,0,6,0">
@@ -572,27 +835,28 @@
                   <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Load"/></StackPanel>
                 </Button>
               </StackPanel>
-              <TextBlock x:Name="RestoreInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="2,8,0,0"/>
+              <TextBlock x:Name="RestoreInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,8,0,0"/>
               <TextBlock Text="OPTIONS" Style="{StaticResource SideLabel}"/>
-              <CheckBox x:Name="OptSkipInstalled" Style="{StaticResource Switch}" Content="Skip apps already installed" IsChecked="True"/>
-              <CheckBox x:Name="OptPreferLocal" Style="{StaticResource Switch}" Content="Use saved installers" IsChecked="True"/>
-              <CheckBox x:Name="OptOnlineFallback" Style="{StaticResource Switch}" Content="Fall back to winget online" IsChecked="True"/>
-              <CheckBox x:Name="OptSilent" Style="{StaticResource Switch}" Content="Silent installs" IsChecked="True"/>
-              <CheckBox x:Name="OptTestRun" Style="{StaticResource Switch}" Content="Test run (change nothing)"/>
-              <Button x:Name="BtnStartRestore" Style="{StaticResource BtnPrimary}" Margin="0,14,0,6" Padding="12,10">
+              <StackPanel Margin="10,0,4,0">
+                <CheckBox x:Name="OptSkipInstalled" Style="{StaticResource Switch}" Content="Skip apps already installed" IsChecked="True"/>
+                <CheckBox x:Name="OptPreferLocal" Style="{StaticResource Switch}" Content="Use saved installers" IsChecked="True"/>
+                <CheckBox x:Name="OptOnlineFallback" Style="{StaticResource Switch}" Content="Fall back to winget online" IsChecked="True"/>
+                <CheckBox x:Name="OptSilent" Style="{StaticResource Switch}" Content="Silent installs" IsChecked="True"/>
+                <CheckBox x:Name="OptTestRun" Style="{StaticResource Switch}" Content="Test run (change nothing)"/>
+              </StackPanel>
+              <Button x:Name="BtnStartRestore" Style="{StaticResource BtnPrimary}" Margin="0,16,0,8" Padding="12,10">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Start restore" FontSize="14"/></StackPanel>
               </Button>
-              <Button x:Name="BtnManualLinks" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Open manual links"/></StackPanel>
+              <Button x:Name="BtnManualLinks" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open manual links"/></StackPanel>
               </Button>
-              <Button x:Name="BtnQueueGames" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Queue ticked games in Steam"/></StackPanel>
+              <Button x:Name="BtnQueueGames" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Queue ticked games in Steam"/></StackPanel>
               </Button>
-              <Button x:Name="BtnOpenRestoreReport" Style="{StaticResource Btn}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Open report"/></StackPanel>
+              <Button x:Name="BtnOpenRestoreReport" Style="{StaticResource BtnGhost}">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open report"/></StackPanel>
               </Button>
-              <TextBlock Text="SUMMARY" Style="{StaticResource SideLabel}"/>
-              <Border Background="{StaticResource Panel2}" CornerRadius="8" Padding="12,10">
+              <Border Background="{StaticResource Panel2}" CornerRadius="12" Padding="14,13" Margin="0,16,0,0">
                 <StackPanel x:Name="RestoreSummary"/>
               </Border>
             </StackPanel>
@@ -604,23 +868,24 @@
             <RowDefinition Height="210"/>
           </Grid.RowDefinitions>
           <ScrollViewer x:Name="RestoreScroll" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-            <Grid x:Name="RestoreColumns" Margin="16,8,12,12"/>
+            <Grid x:Name="RestoreColumns" Margin="18,6,14,12"/>
           </ScrollViewer>
           <StackPanel x:Name="RestoreEmpty" VerticalAlignment="Center" HorizontalAlignment="Center">
             <TextBlock Text="&#xE777;" FontFamily="{StaticResource Icons}" FontSize="36" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"/>
             <TextBlock Text="Pick a WinPrestige backup folder to restore from." Foreground="{StaticResource Muted}" FontSize="14" Margin="0,12,0,0" HorizontalAlignment="Center"/>
           </StackPanel>
-          <ListBox x:Name="RestoreLog" Grid.Row="1" Style="{StaticResource LogList}" Margin="16,0,16,14"/>
+          <ListBox x:Name="RestoreLog" Grid.Row="1" Style="{StaticResource LogList}" Margin="18,0,18,16"/>
         </Grid>
       </Grid>
     </Grid>
 
     <!-- Status bar -->
-    <Border Grid.Row="2" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="16,7">
+    <Border Grid.Row="3" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="18,7">
       <DockPanel LastChildFill="True">
         <Button x:Name="BtnCancel" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="10,0,0,0" Padding="12,3" Visibility="Collapsed" Content="Cancel"/>
         <ProgressBar x:Name="Progress" DockPanel.Dock="Right" Style="{StaticResource Thin}" Width="240" Margin="12,0,0,0" Visibility="Collapsed" Maximum="1"/>
         <TextBlock x:Name="AdminBadge" DockPanel.Dock="Right" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" Margin="12,0,0,0"/>
+        <ContentControl x:Name="BusySpinner" DockPanel.Dock="Left" Width="14" Height="14" Margin="0,0,10,0" VerticalAlignment="Center" Visibility="Collapsed"/>
         <TextBlock x:Name="StatusText" Foreground="{StaticResource Muted}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" Text="Ready"/>
       </DockPanel>
     </Border>

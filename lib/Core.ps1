@@ -16,7 +16,7 @@ function Initialize-WP {
         $Sync
     )
     $script:WP.Root = $Root
-    $script:WP.Version = '1.0.1'
+    $script:WP.Version = '1.1.0'
     $script:WP.StateDir = Join-Path $env:LOCALAPPDATA 'WinPrestige'
     if (-not (Test-Path -LiteralPath $script:WP.StateDir)) {
         New-Item -ItemType Directory -Path $script:WP.StateDir -Force | Out-Null
@@ -1625,12 +1625,12 @@ function Export-WPReport {
     $games = @($apps | Where-Object { $_.Category -eq 'games' })
     $sb = New-Object System.Text.StringBuilder
     $css = @'
-:root{--bg:#16181c;--panel:#1e2126;--panel2:#262a31;--line:#323843;--text:#e6e8eb;--muted:#8b93a1;--accent:#3d8bfd;--good:#3fb950;--warn:#d29922;--bad:#f85149}
+:root{--bg:#0a0f1a;--panel:#0f1726;--panel2:#152036;--line:#1f2b42;--text:#e4edf7;--muted:#7f8fa9;--accent:#5fcfe3;--good:#3ddc97;--warn:#f2b24c;--bad:#f2667a;--brand:linear-gradient(90deg,#4cdbda,#7b9ce9 55%,#c094f0)}
 @media (prefers-color-scheme: light){:root{--bg:#f6f7f9;--panel:#fff;--panel2:#f0f2f5;--line:#dde1e7;--text:#1b1f24;--muted:#5d6673;--accent:#1f6feb;--good:#1a7f37;--warn:#9a6700;--bad:#cf222e}}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI",system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI",system-ui,sans-serif;border-top:3px solid #4cdbda;border-image:var(--brand) 1}
 main{max-width:1100px;margin:0 auto;padding:32px 20px 60px}h1{font-size:26px;margin:0 0 4px}h2{font-size:17px;margin:34px 0 10px;color:var(--accent)}
 .sub{color:var(--muted)}.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:22px 0}
-.stat{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}.stat b{display:block;font-size:22px}.stat span{color:var(--muted);font-size:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:12px 14px}.stat b{display:block;font-size:22px;background:var(--brand);-webkit-background-clip:text;background-clip:text;color:transparent}.stat span{color:var(--muted);font-size:12px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 18px}ol{margin:6px 0 0;padding-left:20px}li{margin:4px 0}
 table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
 th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{background:var(--panel2);font-size:12px;color:var(--muted);font-weight:600}

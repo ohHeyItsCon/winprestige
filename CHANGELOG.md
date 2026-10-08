@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- New logo and app icon.
+- Redesigned interface: navy theme with the logo's teal-to-lilac colours, a Back up / Restore switch, numbered backup steps with a Next button, monogram tiles for every app, one checkbox per group (with a partial state), and summary cards with progress bars.
+- The HTML report matches the new look.
+- Animations: sliding toggle switches and Back up / Restore switch, checkboxes that pop in, growing step underline, button hover and press effects, loading circles while scanning, downloading and installing, smooth progress bars with a shimmer while the total isn't known, and page fade-ins.
+
 ## 1.0.1
 
 - Settings folders over 1 GB now start unticked as intended. Before, they were ticked when their size was already known.

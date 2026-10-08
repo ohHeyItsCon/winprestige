@@ -114,8 +114,11 @@ Initialize-WP -Root $WPRoot -Sync $sync
 . (Join-Path $WPRoot 'lib\Demo.ps1')
 
 $MidDot = [string][char]0x00B7
+# Screenshots are rendered mid-frame, so code-driven animations are off in screenshot mode.
+$Animate = -not [bool]$Screenshot
 $Ellipsis = [string][char]0x2026
-$Palette = @{ Text = '#E6E8EB'; Soft = '#C9CED6'; Muted = '#8B93A1'; Accent = '#3D8BFD'; Good = '#3FB950'; Warn = '#D29922'; Bad = '#F85149'; Purple = '#A371F7' }
+$Palette = @{ Text = '#E4EDF7'; Soft = '#B8C5D9'; Muted = '#7F8FA9'; Accent = '#5FCFE3'; Good = '#3DDC97'; Warn = '#F2B24C'; Bad = '#F2667A'; Purple = '#C094F0'; Line = '#1F2B42'; Tile = '#152036' }
+$AvatarColors = @('#4CDBDA', '#7B9CE9', '#C094F0', '#5FCFE3', '#3DDC97', '#F2B24C', '#F2667A', '#8FA8FF', '#E78FD0', '#6EC1FF')
 
 #region Settings ---------------------------------------------------------------
 
@@ -173,7 +176,7 @@ $state = @{
     Settings = Get-WPSettings
     AppCols = 0; ConfigCols = 0; RestoreCols = 0
     Restore = $null; RestoreRoot = ''; RRows = @{}; RestoreSel = @{}
-    Dirty = @{}; LastReport = ''
+    Dirty = @{}; LastReport = ''; GroupChecks = @{}; LastBackupTab = 'TabApps'; SummaryLast = @{}; WasBusy = $false
     LogFile = Join-Path $script:WP.StateDir ("winprestige-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
 }
 
@@ -248,6 +251,146 @@ function New-WPCopyText {
     return $tb
 }
 
+function New-WPDoubleAnimation {
+    param([double]$To, [int]$Ms = 220, $From = $null, [switch]$Forever, [switch]$Linear)
+    $a = New-Object Windows.Media.Animation.DoubleAnimation
+    if ($null -ne $From) { $a.From = [double]$From }
+    $a.To = $To
+    $a.Duration = New-Object Windows.Duration ([TimeSpan]::FromMilliseconds($Ms))
+    if ($Forever) { $a.RepeatBehavior = [Windows.Media.Animation.RepeatBehavior]::Forever }
+    if (-not $Linear) {
+        $e = New-Object Windows.Media.Animation.CubicEase
+        $e.EasingMode = 'EaseOut'
+        $a.EasingFunction = $e
+    }
+    return $a
+}
+
+function Invoke-WPFadeIn {
+    # Pages and panels fade in and slide up a little when they change.
+    param($Element, [double]$Offset = 10, [int]$Ms = 220)
+    if (-not $Animate -or -not $Element) { return }
+    if ($Element.RenderTransform -isnot [Windows.Media.TranslateTransform]) { $Element.RenderTransform = New-Object Windows.Media.TranslateTransform }
+    $Element.BeginAnimation([Windows.UIElement]::OpacityProperty, (New-WPDoubleAnimation 1 $Ms 0))
+    $Element.RenderTransform.BeginAnimation([Windows.Media.TranslateTransform]::YProperty, (New-WPDoubleAnimation 0 $Ms $Offset))
+}
+
+function New-WPSpinner {
+    # A spinning arc on a faint ring, used wherever something is loading.
+    param([double]$Size = 14, [string]$Color = $Palette.Accent)
+    $g = New-Object Windows.Controls.Grid
+    $g.Width = $Size; $g.Height = $Size
+    $thick = [Math]::Max(1.6, $Size / 8)
+    $radius = ($Size - $thick) / 2
+    $mid = $Size / 2
+    $ring = New-Object Windows.Shapes.Ellipse
+    $ring.Stroke = Get-WPBrush $Color 45
+    $ring.StrokeThickness = $thick
+    $arc = New-Object Windows.Shapes.Path
+    $inv = [Globalization.CultureInfo]::InvariantCulture
+    $arc.Data = [Windows.Media.Geometry]::Parse([string]::Format($inv, 'M {0},{1} A {2},{2} 0 0 1 {3},{4}', $mid, ($thick / 2), $radius, ($Size - $thick / 2), $mid))
+    $arc.Stroke = Get-WPBrush $Color
+    $arc.StrokeThickness = $thick
+    $arc.StrokeStartLineCap = 'Round'
+    $arc.StrokeEndLineCap = 'Round'
+    $spin = New-Object Windows.Media.RotateTransform
+    $spin.CenterX = $mid; $spin.CenterY = $mid
+    $arc.RenderTransform = $spin
+    [void]$g.Children.Add($ring)
+    [void]$g.Children.Add($arc)
+    $spin.BeginAnimation([Windows.Media.RotateTransform]::AngleProperty, (New-WPDoubleAnimation 360 850 0 -Forever -Linear))
+    return $g
+}
+
+function Move-WPModeThumb {
+    # Slides the gradient pill behind the Back up / Restore switch to the selected side.
+    param([switch]$Instant)
+    $btn = $ui.ModeBackup
+    if ($ui.ModeRestore.IsChecked) { $btn = $ui.ModeRestore }
+    if ($btn.ActualWidth -le 0) { return }
+    $x = $btn.TranslatePoint((New-Object Windows.Point 0, 0), $ui.ModeButtons).X
+    $thumb = $ui.ModeThumb
+    if ($Instant -or -not $Animate) {
+        $thumb.BeginAnimation([Windows.FrameworkElement]::WidthProperty, $null)
+        $thumb.RenderTransform.BeginAnimation([Windows.Media.TranslateTransform]::XProperty, $null)
+        $thumb.Width = $btn.ActualWidth
+        $thumb.RenderTransform.X = $x
+        return
+    }
+    $thumb.BeginAnimation([Windows.FrameworkElement]::WidthProperty, (New-WPDoubleAnimation $btn.ActualWidth 260))
+    $thumb.RenderTransform.BeginAnimation([Windows.Media.TranslateTransform]::XProperty, (New-WPDoubleAnimation $x 260))
+}
+
+function New-WPAvatar {
+    # A small monogram tile in a colour picked from the name, so every app gets a recognisable mark.
+    param([string]$Name, [double]$Size = 24)
+    $clean = Get-WPCleanName $Name
+    if (-not $clean) { $clean = $Name }
+    $words = @($clean -split '[^A-Za-z0-9]+' | Where-Object { $_ })
+    $letters = '?'
+    if ($words.Count -ge 2) { $letters = ($words[0].Substring(0, 1) + $words[1].Substring(0, 1)).ToUpperInvariant() }
+    elseif ($words.Count -eq 1) { $letters = $words[0].Substring(0, 1).ToUpperInvariant() }
+    $sum = 0
+    foreach ($ch in $clean.ToCharArray()) { $sum += [int]$ch }
+    $color = $AvatarColors[$sum % $AvatarColors.Count]
+    $b = New-Object Windows.Controls.Border
+    $b.Width = $Size; $b.Height = $Size
+    $b.CornerRadius = [Math]::Round($Size * 0.3)
+    $b.Background = Get-WPBrush $color 34
+    $b.BorderBrush = Get-WPBrush $color 70
+    $b.BorderThickness = 1
+    $b.VerticalAlignment = 'Center'
+    $tb = New-Object Windows.Controls.TextBlock
+    $tb.Text = $letters
+    $tb.FontSize = [Math]::Round($Size * 0.4, 1)
+    $tb.FontWeight = 'SemiBold'
+    $tb.Foreground = Get-WPBrush $color
+    $tb.HorizontalAlignment = 'Center'
+    $tb.VerticalAlignment = 'Center'
+    $b.Child = $tb
+    return $b
+}
+
+function Set-WPSummaryCard {
+    # Big "x of y" figure with a progress bar, then a breakdown with coloured dots.
+    param($Panel, [int]$Value, [int]$Total, [string]$Label, [object[]]$Lines)
+    $Panel.Children.Clear()
+    $top = New-Object Windows.Controls.TextBlock
+    $r1 = New-Object Windows.Documents.Run ([string]$Value)
+    $r1.FontSize = 26; $r1.FontWeight = 'SemiBold'; $r1.Foreground = Get-WPBrush $Palette.Text
+    $r2 = New-Object Windows.Documents.Run ("  of $Total")
+    $r2.FontSize = 13; $r2.Foreground = Get-WPBrush $Palette.Muted
+    [void]$top.Inlines.Add($r1); [void]$top.Inlines.Add($r2)
+    [void]$Panel.Children.Add($top)
+    [void]$Panel.Children.Add((New-WPText $Label 12 $Palette.Muted))
+    $bar = New-Object Windows.Controls.ProgressBar
+    $bar.Style = $window.FindResource('Thin')
+    $bar.Maximum = [Math]::Max(1, $Total)
+    $bar.Value = [Math]::Min($Value, $bar.Maximum)
+    $bar.Margin = '0,10,0,10'
+    [void]$Panel.Children.Add($bar)
+    $key = [string]$Panel.Name
+    $from = 0
+    if ($state.SummaryLast.ContainsKey($key)) { $from = [Math]::Min([double]$state.SummaryLast[$key], $bar.Maximum) }
+    $state.SummaryLast[$key] = $bar.Value
+    if ($Animate) { $bar.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, (New-WPDoubleAnimation $bar.Value 420 $from)) }
+    foreach ($l in $Lines) {
+        $dp = New-Object Windows.Controls.DockPanel
+        $dp.Margin = '0,3'
+        $dotColor = $Palette.Muted
+        if ($l.Count -gt 2 -and $l[2]) { $dotColor = $l[2] }
+        $dot = New-Object Windows.Shapes.Ellipse
+        $dot.Width = 8; $dot.Height = 8; $dot.Fill = Get-WPBrush $dotColor; $dot.Margin = '0,0,9,0'; $dot.VerticalAlignment = 'Center'
+        [Windows.Controls.DockPanel]::SetDock($dot, 'Left')
+        $v = New-WPText ([string]$l[1]) 12.5 $Palette.Text 'SemiBold'
+        [Windows.Controls.DockPanel]::SetDock($v, 'Right')
+        [void]$dp.Children.Add($dot)
+        [void]$dp.Children.Add($v)
+        [void]$dp.Children.Add((New-WPText ([string]$l[0]) 12.5 $Palette.Soft))
+        [void]$Panel.Children.Add($dp)
+    }
+}
+
 function Set-WPSummary {
     param($Panel, [object[]]$Lines)
     $Panel.Children.Clear()
@@ -271,7 +414,7 @@ function Set-WPStatus {
 
 function Add-WPLogLine {
     param([string]$Text, [string]$Level = 'info')
-    $color = switch ($Level) { 'ok' { $Palette.Good } 'warn' { $Palette.Warn } 'error' { $Palette.Bad } 'step' { $Palette.Accent } default { '#B7BDC7' } }
+    $color = switch ($Level) { 'ok' { $Palette.Good } 'warn' { $Palette.Warn } 'error' { $Palette.Bad } 'step' { $Palette.Accent } default { '#AEBBD0' } }
     if ($Level -ne 'info' -or -not $state.LogTarget) { Set-WPStatus $Text }
     $line = (Get-Date).ToString('HH:mm:ss') + '  ' + $Text
     if (-not $Demo) { try { [IO.File]::AppendAllText($state.LogFile, $line + "`r`n") } catch { } }
@@ -340,39 +483,61 @@ function Get-WPColumnCount {
 function New-WPGroupHeader {
     param([string]$Title, [int]$Count, [string]$Hint, [string]$Tag, [switch]$NoSelectLinks)
     $sp = New-Object Windows.Controls.StackPanel
-    $sp.Margin = '2,12,0,6'
-    $dp = New-Object Windows.Controls.DockPanel
+    $sp.Margin = '0,14,0,4'
+    $row = New-Object Windows.Controls.StackPanel
+    $row.Orientation = 'Horizontal'
     if (-not $NoSelectLinks) {
-        $links = New-Object Windows.Controls.StackPanel
-        $links.Orientation = 'Horizontal'
-        $links.VerticalAlignment = 'Bottom'
-        [Windows.Controls.DockPanel]::SetDock($links, 'Right')
-        $all = New-WPLinkButton 'All' ($Tag + '|1') { Set-WPGroupSelection $this.Tag } '0,0,10,0'
-        $none = New-WPLinkButton 'None' ($Tag + '|0') { Set-WPGroupSelection $this.Tag } '0'
-        $all.FontSize = 11.5; $none.FontSize = 11.5
-        [void]$links.Children.Add($all)
-        [void]$links.Children.Add($none)
-        [void]$dp.Children.Add($links)
+        # One checkbox per group: ticked, unticked, or a dash when only some are ticked.
+        $cb = New-Object Windows.Controls.CheckBox
+        $cb.Style = $window.FindResource('Chk')
+        $cb.Tag = $Tag
+        $cb.Margin = '6,0,0,0'
+        $cb.ToolTip = 'Tick or untick everything in this group'
+        $cb.Add_Click({ Set-WPGroupSelection ($this.Tag + '|' + $(if ($this.IsChecked -eq $true) { '1' } else { '0' })) })
+        $state.GroupChecks[$Tag] = $cb
+        [void]$row.Children.Add($cb)
     }
-    $titleBlock = New-Object Windows.Controls.TextBlock
-    $run1 = New-Object Windows.Documents.Run $Title
-    $run1.Foreground = Get-WPBrush $Palette.Accent
-    $run1.FontWeight = 'SemiBold'
-    $run1.FontSize = 14.5
-    $run2 = New-Object Windows.Documents.Run ("  $Count")
-    $run2.Foreground = Get-WPBrush $Palette.Muted
-    $run2.FontSize = 12
-    [void]$titleBlock.Inlines.Add($run1)
-    [void]$titleBlock.Inlines.Add($run2)
-    [void]$dp.Children.Add($titleBlock)
-    [void]$sp.Children.Add($dp)
-    if ($Hint) { [void]$sp.Children.Add((New-WPText $Hint 11.5 $Palette.Muted -Wrap -Margin '0,1,0,2')) }
+    $titleText = New-WPText $Title 14.5 $Palette.Text 'SemiBold' -Margin '10,0,0,0'
+    $titleText.VerticalAlignment = 'Center'
+    [void]$row.Children.Add($titleText)
+    $pill = New-Object Windows.Controls.Border
+    $pill.CornerRadius = 8
+    $pill.Padding = '7,1,7,2'
+    $pill.Margin = '8,0,0,0'
+    $pill.VerticalAlignment = 'Center'
+    $pill.Background = Get-WPBrush $Palette.Tile
+    $pill.Child = New-WPText ([string]$Count) 11.5 $Palette.Muted 'SemiBold'
+    [void]$row.Children.Add($pill)
+    [void]$sp.Children.Add($row)
+    if ($Hint) {
+        $indent = 10
+        if (-not $NoSelectLinks) { $indent = 34 }
+        [void]$sp.Children.Add((New-WPText $Hint 11.5 $Palette.Muted -Wrap -Margin "$indent,3,0,2"))
+    }
     $line = New-Object Windows.Controls.Border
     $line.Height = 1
-    $line.Background = Get-WPBrush '#30353F'
-    $line.Margin = '0,5,0,2'
+    $line.Background = Get-WPBrush $Palette.Line
+    $line.Margin = '6,7,0,3'
     [void]$sp.Children.Add($line)
     return $sp
+}
+
+function Update-WPGroupChecks {
+    # Keeps each group checkbox in step with the rows under it.
+    foreach ($tag in @($state.GroupChecks.Keys)) {
+        $parts = $tag -split '\|'
+        $values = @()
+        if ($parts[0] -eq 'apps') {
+            $values = @($state.Apps | Where-Object { $_.Category -eq $parts[1] -and (Test-WPFilter @($_.Name, $_.WingetId, $_.Publisher)) } | ForEach-Object { [bool]$_.Selected })
+        } elseif ($parts[0] -eq 'restore') {
+            $values = @($state.RRows.Keys | Where-Object { $state.RRows[$_].Group -eq $parts[1] -and $state.RRows[$_].Check.IsEnabled } | ForEach-Object { [bool]$state.RestoreSel[$_] })
+        }
+        $on = @($values | Where-Object { $_ }).Count
+        $cb = $state.GroupChecks[$tag]
+        if ($values.Count -gt 0 -and $on -eq $values.Count) { $cb.IsChecked = $true }
+        elseif ($on -eq 0) { $cb.IsChecked = $false }
+        else { $cb.IsChecked = $null }
+    }
 }
 
 function Test-WPFilter {
@@ -393,7 +558,20 @@ function Set-WPBusy {
     $ui.BtnCancel.Visibility = $vis
     $ui.Progress.Visibility = $vis
     foreach ($n in @('BtnScan', 'BtnLinks', 'BtnStartBackup', 'BtnStartRestore', 'BtnDetectConfigs', 'BtnLoadBackup')) { $ui[$n].IsEnabled = -not $busy }
-    if (-not $busy) { $ui.Progress.Value = 0; $ui.BtnCancel.IsEnabled = $true }
+    if ($busy -and -not $ui.BusySpinner.Content) { $ui.BusySpinner.Content = New-WPSpinner 14 }
+    $ui.BusySpinner.Visibility = $vis
+    if ($busy -and -not $state.WasBusy) {
+        $ui.Progress.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, $null)
+        $ui.Progress.Value = 0
+        $ui.Progress.IsIndeterminate = $true
+    }
+    if (-not $busy) {
+        $ui.Progress.IsIndeterminate = $false
+        $ui.Progress.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, $null)
+        $ui.Progress.Value = 0
+        $ui.BtnCancel.IsEnabled = $true
+    }
+    $state.WasBusy = $busy
 }
 
 function Start-WPJob {
@@ -418,8 +596,16 @@ function Invoke-WPMessage {
         'log' { Add-WPLogLine $m.Text $m.Level }
         'progress' {
             $ui.Progress.Visibility = 'Visible'
-            $ui.Progress.Maximum = [Math]::Max(1, [int]$m.Maximum)
-            $ui.Progress.Value = [Math]::Min([int]$m.Value, $ui.Progress.Maximum)
+            $ui.Progress.IsIndeterminate = $false
+            $max = [Math]::Max(1, [int]$m.Maximum)
+            $val = [Math]::Min([int]$m.Value, $max)
+            if ($ui.Progress.Maximum -ne $max) {
+                $ui.Progress.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, $null)
+                $ui.Progress.Value = 0
+                $ui.Progress.Maximum = $max
+            }
+            if ($Animate) { $ui.Progress.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, (New-WPDoubleAnimation $val 300)) }
+            else { $ui.Progress.Value = $val }
             if ($m.Text) { Set-WPStatus $m.Text }
         }
         'app' {
@@ -525,7 +711,7 @@ function New-WPAppRow {
     $row.Style = $window.FindResource('Row')
     $row.Tag = $App.Key
     $g = New-Object Windows.Controls.Grid
-    foreach ($w in @('Auto', '*', 'Auto', 'Auto')) {
+    foreach ($w in @('Auto', 'Auto', '*', 'Auto', 'Auto')) {
         $cd = New-Object Windows.Controls.ColumnDefinition
         if ($w -eq '*') { $cd.Width = New-Object Windows.GridLength 1, ([Windows.GridUnitType]::Star) } else { $cd.Width = [Windows.GridLength]::Auto }
         $g.ColumnDefinitions.Add($cd)
@@ -534,19 +720,19 @@ function New-WPAppRow {
     $cb.Style = $window.FindResource('Chk')
     $cb.Tag = $App.Key
     $cb.Add_Click({ Set-WPAppSelected $this.Tag ([bool]$this.IsChecked) })
-    $name = New-WPText $App.Name 13 $Palette.Text -Margin '9,0,4,0'
+    $avatar = New-WPAvatar $App.Name 24
+    $avatar.Margin = '1,0,0,0'
+    $name = New-WPText $App.Name 13 $Palette.Text -Margin '10,0,4,0'
     $name.VerticalAlignment = 'Center'
     $badgeHost = New-Object Windows.Controls.Border
     $badgeHost.VerticalAlignment = 'Center'
     $dot = New-Object Windows.Shapes.Ellipse
     $dot.Width = 7; $dot.Height = 7; $dot.Margin = '7,0,1,0'; $dot.VerticalAlignment = 'Center'
-    [Windows.Controls.Grid]::SetColumn($name, 1)
-    [Windows.Controls.Grid]::SetColumn($badgeHost, 2)
-    [Windows.Controls.Grid]::SetColumn($dot, 3)
-    [void]$g.Children.Add($cb)
-    [void]$g.Children.Add($name)
-    [void]$g.Children.Add($badgeHost)
-    [void]$g.Children.Add($dot)
+    [Windows.Controls.Grid]::SetColumn($avatar, 1)
+    [Windows.Controls.Grid]::SetColumn($name, 2)
+    [Windows.Controls.Grid]::SetColumn($badgeHost, 3)
+    [Windows.Controls.Grid]::SetColumn($dot, 4)
+    foreach ($el in @($cb, $avatar, $name, $badgeHost, $dot)) { [void]$g.Children.Add($el) }
     $row.Child = $g
     $row.Add_MouseLeftButtonUp({ Show-WPDetails $this.Tag })
     $state.Rows[$App.Key] = @{ Root = $row; Check = $cb; Name = $name; Badge = $badgeHost; Dot = $dot }
@@ -565,6 +751,18 @@ function Update-WPAppRow {
         'Downloaded' { $Palette.Good } 'Up to date' { $Palette.Good } 'Kept previous' { $Palette.Warn } 'Failed' { $Palette.Bad } 'Downloading' { $Palette.Accent } default { $null }
     }
     if ($dotColor) { $r.Dot.Fill = Get-WPBrush $dotColor; $r.Dot.Visibility = 'Visible' } else { $r.Dot.Visibility = 'Collapsed' }
+    if ($App.Status -eq 'Downloading' -or $App.Match -eq 'searching') {
+        if (-not $r.Spin) {
+            $r.Spin = New-WPSpinner 12
+            $r.Spin.Margin = '7,0,0,0'
+            [Windows.Controls.Grid]::SetColumn($r.Spin, 4)
+            [void]$r.Dot.Parent.Children.Add($r.Spin)
+        }
+        $r.Spin.Visibility = 'Visible'
+        $r.Dot.Visibility = 'Collapsed'
+    } elseif ($r.Spin) {
+        $r.Spin.Visibility = 'Collapsed'
+    }
     $tip = @($App.Name)
     $meta = @($App.Publisher, $App.Version) | Where-Object { $_ }
     if ($meta) { $tip += ($meta -join "  $MidDot  ") }
@@ -589,6 +787,7 @@ function Get-WPVisibleAppGroups {
 }
 
 function Update-WPAppLayout {
+    foreach ($k in @($state.GroupChecks.Keys)) { if ($k -like 'apps|*') { $state.GroupChecks.Remove($k) } }
     $groups = @()
     foreach ($g in @(Get-WPVisibleAppGroups)) {
         $groups += @{
@@ -608,15 +807,14 @@ function Update-WPAppSummary {
     $counts = @{}
     foreach ($a in $sel) { $p = Get-WPAppPlan $a; $counts[$p] = 1 + [int]$counts[$p] }
     $games = @($state.Apps | Where-Object { $_.Category -eq 'games' }).Count
-    Set-WPSummary $ui.AppSummary @(
-        @('Installed', $visible.Count),
-        @('Ticked', $sel.Count, $Palette.Accent),
-        @('winget installers', [int]$counts['winget']),
-        @('Your links', [int]$counts['custom']),
-        @('Store', ([int]$counts['store'] + [int]$counts['storelink'])),
-        @('Manual', ([int]$counts['manual'] + [int]$counts['unchecked']), $(if ($counts['manual'] -or $counts['unchecked']) { $Palette.Warn } else { $null })),
-        @('Games skipped', $games)
+    Set-WPSummaryCard $ui.AppSummary $sel.Count $visible.Count 'apps ticked for the backup' @(
+        @('winget installers', [int]$counts['winget'], $Palette.Accent),
+        @('Microsoft Store', ([int]$counts['store'] + [int]$counts['storelink']), $Palette.Purple),
+        @('Your links', [int]$counts['custom'], $Palette.Good),
+        @('Manual', ([int]$counts['manual'] + [int]$counts['unchecked']), $Palette.Warn),
+        @('Games skipped', $games, $Palette.Muted)
     )
+    Update-WPGroupChecks
 }
 
 function Set-WPAppSelected {
@@ -630,6 +828,7 @@ function Set-WPAppSelected {
     Update-WPAppSummary
     Update-WPBackupStats
     if ($ui.ShowSelectedOnly.IsChecked) { Update-WPAppLayout }
+    Update-WPGroupChecks
 }
 
 function Set-WPGroupSelection {
@@ -741,9 +940,18 @@ function Show-WPDetails {
     }
     if ($state.Rows[$Key]) { $state.Rows[$Key].Root.Background = Get-WPBrush $Palette.Accent 40 }
 
-    [void]$p.Children.Add((New-WPText $app.Name 17 $Palette.Text 'SemiBold' -Wrap))
+    $head = New-Object Windows.Controls.DockPanel
+    $big = New-WPAvatar $app.Name 44
+    $big.Margin = '0,0,12,0'
+    [Windows.Controls.DockPanel]::SetDock($big, 'Left')
+    [void]$head.Children.Add($big)
+    $titles = New-Object Windows.Controls.StackPanel
+    $titles.VerticalAlignment = 'Center'
+    [void]$titles.Children.Add((New-WPText $app.Name 17 $Palette.Text 'SemiBold' -Wrap))
     $meta = @($app.Publisher, $app.Version) | Where-Object { $_ }
-    if ($meta) { Add-WPDetailText ($meta -join "  $MidDot  ") $Palette.Muted '0,3,0,0' }
+    if ($meta) { [void]$titles.Children.Add((New-WPText ($meta -join "  $MidDot  ") 12.5 $Palette.Muted -Wrap -Margin '0,2,0,0')) }
+    [void]$head.Children.Add($titles)
+    [void]$p.Children.Add($head)
     $chips = New-Object Windows.Controls.WrapPanel
     $chips.Margin = '0,8,0,0'
     $cat = Get-WPCategoryInfo $app.Category
@@ -854,6 +1062,7 @@ function Show-WPDetails {
         Add-WPDetailText $app.Status $color
         if ($app.Detail) { Add-WPDetailText $app.Detail $Palette.Muted }
     }
+    if ($prev -ne $Key) { Invoke-WPFadeIn $ui.Details 6 180 }
 }
 
 function Set-WPChosen {
@@ -932,6 +1141,9 @@ function Save-WPScanCache {
 
 function Start-WPScan {
     $ui.AppEmptyText.Text = "Scanning your apps$Ellipsis"
+    if (-not $ui.AppSpinner.Content) { $ui.AppSpinner.Content = New-WPSpinner 40 }
+    $ui.AppSpinner.Visibility = 'Visible'
+    $ui.AppEmptyIcon.Visibility = 'Collapsed'
     $state.LogTarget = $null
     Start-WPJob 'Scan' {
         if ($P.Demo) {
@@ -946,6 +1158,8 @@ function Start-WPScan {
         param($r, $err)
         if ($err -or -not $r) {
             $ui.AppEmptyText.Text = 'The scan failed. See the status bar, then press Scan this PC to try again.'
+            $ui.AppSpinner.Visibility = 'Collapsed'
+            $ui.AppEmptyIcon.Visibility = 'Visible'
             return
         }
         Set-WPAppsFromScan @($r.Apps)
@@ -1022,7 +1236,13 @@ function New-WPConfigCard {
     $cb = New-Object Windows.Controls.CheckBox
     $cb.Style = $window.FindResource('Chk')
     $cb.Tag = $Cfg.Id
-    $cb.Content = New-WPText $Cfg.Name 14 $Palette.Text 'SemiBold'
+    $label = New-Object Windows.Controls.StackPanel
+    $label.Orientation = 'Horizontal'
+    [void]$label.Children.Add((New-WPAvatar $Cfg.Name 26))
+    $cfgName = New-WPText $Cfg.Name 14 $Palette.Text 'SemiBold' -Margin '10,0,0,0'
+    $cfgName.VerticalAlignment = 'Center'
+    [void]$label.Children.Add($cfgName)
+    $cb.Content = $label
     $cb.Add_Click({ Set-WPConfigSelected $this.Tag ([bool]$this.IsChecked) })
     [void]$top.Children.Add($cb)
     [void]$sp.Children.Add($top)
@@ -1083,11 +1303,9 @@ function Update-WPConfigSummary {
     $sel = @($state.Configs | Where-Object { $_.Selected })
     $bytes = [long](($sel | Where-Object { $_.Bytes -gt 0 } | Measure-Object Bytes -Sum).Sum)
     $running = @($sel | Where-Object { @($_.Running).Count }).Count
-    Set-WPSummary $ui.ConfigSummary @(
-        @('Found', $state.Configs.Count),
-        @('Ticked', $sel.Count, $Palette.Accent),
-        @('Size', (Format-WPSize $bytes)),
-        @('Running now', $running, $(if ($running) { $Palette.Warn } else { $null }))
+    Set-WPSummaryCard $ui.ConfigSummary $sel.Count $state.Configs.Count 'app settings ticked' @(
+        @('Total size', (Format-WPSize $bytes), $Palette.Accent),
+        @('Open right now', $running, $(if ($running) { $Palette.Warn } else { $Palette.Muted }))
     )
 }
 
@@ -1199,6 +1417,21 @@ function New-WPExtraCard {
     $sw.Add_Click({ Set-WPExtraSelected $this.Tag ([bool]$this.IsChecked) })
     [Windows.Controls.DockPanel]::SetDock($sw, 'Right')
     [void]$dp.Children.Add($sw)
+    $glyphs = @{ fonts = 0xE8D2; envvars = 0xE756; wifi = 0xE701; drivers = 0xE964 }
+    $glyph = 0xE8B7
+    if ($glyphs.ContainsKey($Ex.Id)) { $glyph = $glyphs[$Ex.Id] }
+    $tile = New-Object Windows.Controls.Border
+    $tile.Width = 40; $tile.Height = 40; $tile.CornerRadius = 10; $tile.Margin = '0,0,14,0'; $tile.VerticalAlignment = 'Top'
+    $tile.Background = Get-WPBrush $Palette.Accent 30
+    $icon = New-Object Windows.Controls.TextBlock
+    $icon.Text = [string][char]$glyph
+    $icon.FontFamily = $window.FindResource('Icons')
+    $icon.FontSize = 18
+    $icon.Foreground = Get-WPBrush $Palette.Accent
+    $icon.HorizontalAlignment = 'Center'; $icon.VerticalAlignment = 'Center'
+    $tile.Child = $icon
+    [Windows.Controls.DockPanel]::SetDock($tile, 'Left')
+    [void]$dp.Children.Add($tile)
     $sp = New-Object Windows.Controls.StackPanel
     $titleRow = New-Object Windows.Controls.WrapPanel
     [void]$titleRow.Children.Add((New-WPText $Ex.Name 14 $Palette.Text 'SemiBold'))
@@ -1364,7 +1597,7 @@ function Update-WPDestInfo {
 function New-WPStatTile {
     param($Value, [string]$Label, [string]$Color = '#E6E8EB')
     $b = New-Object Windows.Controls.Border
-    $b.Background = Get-WPBrush '#252930'
+    $b.Background = Get-WPBrush $Palette.Tile
     $b.CornerRadius = 8
     $b.Padding = '14,9'
     $b.Margin = '0,0,8,8'
@@ -1533,7 +1766,7 @@ function New-WPRestoreRow {
     $row.Height = [double]::NaN
     $row.Padding = '8,4,6,4'
     $g = New-Object Windows.Controls.Grid
-    foreach ($w in @('Auto', '*', 'Auto')) {
+    foreach ($w in @('Auto', 'Auto', '*', 'Auto')) {
         $cd = New-Object Windows.Controls.ColumnDefinition
         if ($w -eq '*') { $cd.Width = New-Object Windows.GridLength 1, ([Windows.GridUnitType]::Star) } else { $cd.Width = [Windows.GridLength]::Auto }
         $g.ColumnDefinitions.Add($cd)
@@ -1546,25 +1779,38 @@ function New-WPRestoreRow {
     $cb.VerticalAlignment = 'Top'
     $cb.Margin = '0,2,0,0'
     $cb.Add_Click({ $state.RestoreSel[$this.Tag] = [bool]$this.IsChecked; Update-WPRestoreSummary })
+    $avatar = New-WPAvatar $Name 22
+    $avatar.Margin = '9,0,0,0'
+    $avatar.VerticalAlignment = 'Top'
     $sp = New-Object Windows.Controls.StackPanel
-    $sp.Margin = '9,0,4,0'
+    $sp.Margin = '10,0,4,0'
     $nameText = New-WPText $Name 13 $Palette.Text
+    $statusRow = New-Object Windows.Controls.DockPanel
+    $statusRow.Visibility = 'Collapsed'
+    $spinHost = New-Object Windows.Controls.ContentControl
+    $spinHost.Margin = '0,1,6,0'
+    $spinHost.VerticalAlignment = 'Center'
+    $spinHost.Visibility = 'Collapsed'
+    [Windows.Controls.DockPanel]::SetDock($spinHost, 'Left')
     $status = New-WPText '' 11.5 $Palette.Muted
-    $status.Visibility = 'Collapsed'
+    [void]$statusRow.Children.Add($spinHost)
+    [void]$statusRow.Children.Add($status)
     [void]$sp.Children.Add($nameText)
-    [void]$sp.Children.Add($status)
+    [void]$sp.Children.Add($statusRow)
     $badgeHost = New-Object Windows.Controls.Border
     $badgeHost.VerticalAlignment = 'Top'
     $badgeHost.Margin = '0,1,0,0'
     if ($Badge) { $badgeHost.Child = New-WPBadge $Badge.Text $Badge.Color }
-    [Windows.Controls.Grid]::SetColumn($sp, 1)
-    [Windows.Controls.Grid]::SetColumn($badgeHost, 2)
+    [Windows.Controls.Grid]::SetColumn($avatar, 1)
+    [Windows.Controls.Grid]::SetColumn($sp, 2)
+    [Windows.Controls.Grid]::SetColumn($badgeHost, 3)
     [void]$g.Children.Add($cb)
+    [void]$g.Children.Add($avatar)
     [void]$g.Children.Add($sp)
     [void]$g.Children.Add($badgeHost)
     $row.Child = $g
     if ($Tip) { $row.ToolTip = $Tip }
-    $state.RRows[$Key] = @{ Root = $row; Check = $cb; Status = $status; Name = $Name; Group = $Group }
+    $state.RRows[$Key] = @{ Root = $row; Check = $cb; Status = $status; StatusRow = $statusRow; SpinHost = $spinHost; Name = $Name; Group = $Group }
     $state.RestoreSel[$Key] = $Checked
 }
 
@@ -1576,7 +1822,13 @@ function Update-WPRestoreStatus {
     $r.Status.Text = $Status
     $r.Status.ToolTip = $Status
     $r.Status.Foreground = Get-WPBrush $color
-    $r.Status.Visibility = 'Visible'
+    $r.StatusRow.Visibility = 'Visible'
+    if ($Level -eq 'step') {
+        if (-not $r.SpinHost.Content) { $r.SpinHost.Content = New-WPSpinner 11 }
+        $r.SpinHost.Visibility = 'Visible'
+    } else {
+        $r.SpinHost.Visibility = 'Collapsed'
+    }
 }
 
 function Import-WPBackup {
@@ -1650,6 +1902,7 @@ function Update-WPRestoreLayout {
         return
     }
     $ui.RestoreEmpty.Visibility = 'Collapsed'
+    foreach ($k in @($state.GroupChecks.Keys)) { if ($k -like 'restore|*') { $state.GroupChecks.Remove($k) } }
     $groups = @()
     $order = @('runtimes', 'drivers', 'launchers', 'apps', 'store', 'bundled', 'configs', 'extras', 'games')
     $titles = @{ configs = 'App settings'; extras = 'Extras' }
@@ -1671,22 +1924,23 @@ function Update-WPRestoreLayout {
 
 function Update-WPRestoreSummary {
     if (-not $state.Restore) { $ui.RestoreSummary.Children.Clear(); return }
+    $all = @($state.Restore.apps | Where-Object { $_.Selected -and $_.Category -ne 'games' -and $_.Category -ne 'system' })
     $apps = @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and $_.Category -ne 'games' })
     $counts = @{}
     foreach ($a in $apps) { $counts[[string]$a.Method] = 1 + [int]$counts[[string]$a.Method] }
     $cfg = @($state.Restore.configs | Where-Object { $state.RestoreSel['config:' + $_.Id] }).Count
     $ext = @($state.Restore.extras | Where-Object { $state.RestoreSel['extra:' + $_.Id] }).Count
     $games = @($state.Restore.apps | Where-Object { $_.Category -eq 'games' -and $state.RestoreSel[$_.Key] }).Count
-    Set-WPSummary $ui.RestoreSummary @(
-        @('Apps ticked', $apps.Count, $Palette.Accent),
-        @('Saved installers', [int]$counts['local']),
-        @('winget online', [int]$counts['winget']),
-        @('Store', ([int]$counts['store'] + [int]$counts['storelink'])),
-        @('Manual', [int]$counts['manual'], $(if ($counts['manual']) { $Palette.Warn } else { $null })),
-        @('App settings', $cfg),
-        @('Extras', $ext),
-        @('Games to queue', $games)
+    Set-WPSummaryCard $ui.RestoreSummary $apps.Count $all.Count 'apps to reinstall' @(
+        @('Saved installers', [int]$counts['local'], $Palette.Good),
+        @('winget online', [int]$counts['winget'], $Palette.Accent),
+        @('Microsoft Store', ([int]$counts['store'] + [int]$counts['storelink']), $Palette.Purple),
+        @('Manual', [int]$counts['manual'], $Palette.Warn),
+        @('App settings', $cfg, $Palette.Soft),
+        @('Extras', $ext, $Palette.Soft),
+        @('Games to queue', $games, $Palette.Muted)
     )
+    Update-WPGroupChecks
 }
 
 function Start-WPRestore {
@@ -1701,7 +1955,7 @@ function Start-WPRestore {
     }
     $ui.RestoreLog.Items.Clear()
     $state.LogTarget = $ui.RestoreLog
-    foreach ($k in @($state.RRows.Keys)) { $state.RRows[$k].Status.Visibility = 'Collapsed' }
+    foreach ($k in @($state.RRows.Keys)) { $state.RRows[$k].StatusRow.Visibility = 'Collapsed' }
     $state.RestoreTestRun = $test
     $opts = @{
         TestRun = $test; SkipInstalled = [bool]$ui.OptSkipInstalled.IsChecked; PreferLocal = [bool]$ui.OptPreferLocal.IsChecked
@@ -1757,13 +2011,33 @@ function Show-WPPage {
         $ui["Page$p"].Visibility = $vis
     }
     $ui.SearchBox.IsEnabled = @('Apps', 'Configs', 'Restore') -contains $Name
+    if ($Name -eq 'Restore') {
+        $ui.StepBar.Visibility = 'Collapsed'
+        if (-not $ui.ModeRestore.IsChecked) { $ui.ModeRestore.IsChecked = $true }
+    } else {
+        $ui.StepBar.Visibility = 'Visible'
+        $state.LastBackupTab = "Tab$Name"
+        if (-not $ui.ModeBackup.IsChecked) { $ui.ModeBackup.IsChecked = $true }
+        $next = @{ Apps = 'Next: App settings'; Configs = 'Next: Extras'; Extras = 'Next: Save backup' }
+        if ($next[$Name]) { $ui.NextStepText.Text = $next[$Name]; $ui.BtnNextStep.Visibility = 'Visible' }
+        else { $ui.BtnNextStep.Visibility = 'Collapsed' }
+    }
     switch ($Name) {
         'Configs' { Update-WPConfigLayout }
         'Restore' { Update-WPRestoreLayout }
         'Backup' { Update-WPBackupStats; Update-WPDestInfo -CheckExisting }
     }
+    Invoke-WPFadeIn $ui["Page$Name"] 12 240
 }
 
+$ui.ModeBackup.Add_Checked({ if ($state.Page -eq 'Restore') { $ui[$state.LastBackupTab].IsChecked = $true }; Move-WPModeThumb })
+$ui.ModeRestore.Add_Checked({ $ui.TabRestore.IsChecked = $true; Move-WPModeThumb })
+$window.Add_ContentRendered({ Move-WPModeThumb -Instant })
+$ui.BtnNextStep.Add_Click({
+        $order = @('Apps', 'Configs', 'Extras', 'Backup')
+        $i = [array]::IndexOf($order, $state.Page)
+        if ($i -ge 0 -and $i -lt $order.Count - 1) { $ui["Tab$($order[$i + 1])"].IsChecked = $true }
+    })
 $ui.TabApps.Add_Checked({ Show-WPPage 'Apps' })
 $ui.TabConfigs.Add_Checked({ Show-WPPage 'Configs' })
 $ui.TabExtras.Add_Checked({ Show-WPPage 'Extras' })
@@ -1929,9 +2203,12 @@ $window.Add_Loaded({
         if ($Demo -and $Mode -ne 'Restore') { Import-WPBackup '\\NAS\Backups\WinPrestige Backup' }
         if (-not $script:WP.Winget) { Set-WPStatus 'winget was not found. Update "App Installer" from the Microsoft Store for the best results.' }
         $timer.Start()
+        Invoke-WPFadeIn $window.Content 8 320
         if ($Mode -eq 'Restore') {
             $ui.TabRestore.IsChecked = $true
             $ui.AppEmptyText.Text = 'Press "Scan this PC" to list the apps on this computer.'
+            $ui.AppSpinner.Visibility = 'Collapsed'
+            $ui.AppEmptyIcon.Visibility = 'Visible'
             if ($restorePath) { Import-WPBackup $restorePath }
         } else {
             $cached = $null
@@ -1963,16 +2240,21 @@ if ($Screenshot) {
                 else { $ui.TabRestore.IsChecked = $true; Start-WPRestore }
                 return
             }
-            $shotTimer.Stop()
-            $ui["Tab$ScreenshotTab"].IsChecked = $true
-            $window.UpdateLayout()
-            switch ($ScreenshotTab) { 'Apps' { Update-WPAppLayout } 'Configs' { Update-WPConfigLayout } 'Restore' { Update-WPRestoreLayout } }
-            if ($ScreenshotSelect) {
-                $pick = $state.Apps | Where-Object { $_.Name -eq $ScreenshotSelect } | Select-Object -First 1
-                if ($pick) { Show-WPDetails $pick.Key }
+            if (-not $state.ShotPrepared) {
+                $state.ShotPrepared = $true
+                $ui["Tab$ScreenshotTab"].IsChecked = $true
+                $window.UpdateLayout()
+                switch ($ScreenshotTab) { 'Apps' { Update-WPAppLayout } 'Configs' { Update-WPConfigLayout } 'Restore' { Update-WPRestoreLayout } }
+                if ($ScreenshotSelect) {
+                    $pick = $state.Apps | Where-Object { $_.Name -eq $ScreenshotSelect } | Select-Object -First 1
+                    if ($pick) { Show-WPDetails $pick.Key }
+                }
+                if ($ScreenshotTab -eq 'Backup') { $window.Height = 1200 }
+                $window.UpdateLayout()
+                Move-WPModeThumb -Instant
+                return
             }
-            if ($ScreenshotTab -eq 'Backup') { $window.Height = 1200; $window.UpdateLayout() }
-
+            $shotTimer.Stop()
             $window.UpdateLayout()
             $w = [int]$window.ActualWidth; $h = [int]$window.ActualHeight
             $rtb = New-Object Windows.Media.Imaging.RenderTargetBitmap $w, $h, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
