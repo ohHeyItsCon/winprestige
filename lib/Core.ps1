@@ -16,7 +16,7 @@ function Initialize-WP {
         $Sync
     )
     $script:WP.Root = $Root
-    $script:WP.Version = '1.2.0'
+    $script:WP.Version = '1.2.1'
     $script:WP.StateDir = Join-Path $env:LOCALAPPDATA 'WinPrestige'
     if (-not (Test-Path -LiteralPath $script:WP.StateDir)) {
         New-Item -ItemType Directory -Path $script:WP.StateDir -Force | Out-Null
@@ -842,7 +842,7 @@ function Test-WPRegistryKey {
 function New-WPConfig {
     param([string]$Id, [string]$Name)
     return [pscustomobject]@{
-        Id = $Id; Name = $Name; App = ''; Items = @(); Registry = @(); Processes = @()
+        Id = $Id; Name = $Name; App = ''; Items = @(); Registry = @(); Processes = @(); Services = @()
         InstallDir = ''; InstallDirFallback = @(); Rewrite = @(); Notes = ''
         Sensitive = $false; Custom = $false; Selected = $false
         Bytes = [long]-1; Files = 0; Running = @(); Status = ''; Detail = ''
@@ -866,6 +866,7 @@ function Get-WPConfigCandidates {
         $c.Items = $items
         $c.Registry = $regs
         $c.Processes = @($prof.processes | Where-Object { $_ })
+        $c.Services = @($prof.services | Where-Object { $_ })
         $c.InstallDir = [string]$installDir
         $c.InstallDirFallback = @($prof.installDirFallback | Where-Object { $_ })
         $c.Rewrite = @($prof.rewrite | Where-Object { $_ })
@@ -1275,6 +1276,7 @@ function Backup-WPConfig {
         installDir = $originalInstallDir
         installDirFallback = @($Config.InstallDirFallback)
         processes = @($Config.Processes)
+        services = @($Config.Services | Where-Object { $_ })
         items = @($items)
         registry = @($regs)
         rewrite = @($Config.Rewrite)
@@ -2193,20 +2195,27 @@ function Invoke-WPRestore {
         Write-WPLog 'Putting app settings back...' 'step'
         foreach ($c in @($Configs)) {
             if (Test-WPCancel) { break }
-            $script = Join-Path $root ("Configs\" + $c.Folder + "\Restore-Config.ps1")
+            $folder = Join-Path $root ("Configs\" + $c.Folder)
+            $script = Join-Path $folder 'Restore-Config.ps1'
+            # Prefer this version's restore script over the copy saved in the backup, so older backups get fixes.
+            $engine = Join-Path $script:WP.Root 'lib\Restore-Config.ps1'
             $key = 'config:' + $c.Id
-            if (-not (Test-Path -LiteralPath $script)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $folder 'restore.json'))) {
                 Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Missing from backup'; Level = 'error' }
                 if ($progress) { $progress.done[$key] = 'failed'; Save-WPRestoreProgress $progress }
                 continue
             }
             Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Restoring...'; Level = 'step' }
             try {
-                $out = & $script -TestRun:$test *>&1 | ForEach-Object { "$_" }
+                if (Test-Path -LiteralPath $engine) { $out = & $engine -Folder $folder -TestRun:$test *>&1 | ForEach-Object { "$_" } }
+                else { $out = & $script -TestRun:$test *>&1 | ForEach-Object { "$_" } }
                 $last = @($out | Where-Object { $_.Trim() }) | Select-Object -Last 1
-                Send-WPMessage 'restoreItem' @{ Key = $key; Status = $(if ($last) { $last.Trim() } else { 'Restored' }); Level = 'ok' }
+                # Restore-Config.ps1 ends with "Check <app>: ..." when its own verification found files that didn't land.
+                $level = $(if ($last -and $last.Trim().StartsWith('Check ')) { 'warn' } else { 'ok' })
+                Send-WPMessage 'restoreItem' @{ Key = $key; Status = $(if ($last) { $last.Trim() } else { 'Restored' }); Level = $level }
                 foreach ($line in $out) { if ($line.Trim()) { Write-WPLog ("  " + $line.Trim()) 'info' } }
-                Write-WPLog ("{0} settings restored" -f $c.Name) 'ok'
+                if ($level -eq 'warn') { Write-WPLog ("{0} settings restored, but some files need a look (see above)" -f $c.Name) 'warn' }
+                else { Write-WPLog ("{0} settings restored" -f $c.Name) 'ok' }
                 if ($progress) { $progress.done[$key] = 'ok'; Save-WPRestoreProgress $progress }
             } catch {
                 Send-WPMessage 'restoreItem' @{ Key = $key; Status = $_.Exception.Message; Level = 'error' }

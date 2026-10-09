@@ -46,7 +46,7 @@ New-Item -ItemType Directory -Path $stage -Force | Out-Null
 foreach ($name in @('WinPrestige.exe', 'WinPrestige.ps1', 'WinPrestige.cmd', 'README.md', 'LICENSE')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
 }
-foreach ($dir in @('lib', 'data', 'assets')) {
+foreach ($dir in @('lib', 'data', 'assets', 'tools')) {
     Copy-Item -LiteralPath (Join-Path $root $dir) -Destination $stage -Recurse
 }
 Remove-Item -LiteralPath (Join-Path $stage 'assets\screenshots') -Recurse -Force -ErrorAction SilentlyContinue

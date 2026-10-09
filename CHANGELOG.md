@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed: app settings that include registry keys (7-Zip, Elgato Stream Deck, PuTTY and others) showed as failed after restoring, and their user-folder path fixes were skipped. The settings themselves were copied; `reg.exe` reports success on its error output, which the restore script mistook for a failure.
+- Background services are paused while their app's settings are copied back, then started again: FanControl, NZXT CAM, Logitech G HUB, Elgato Wave Link, SteelSeries GG and Corsair iCUE. This stops them from relaunching the app or writing over the restored files mid-copy.
+- Every restored settings file is checked afterwards: it has to exist with the same size as in the backup, and saved registry keys have to exist. The Restore screen shows "checked and in place", or a yellow "Check ..." note naming the first file that didn't land.
+- WinPrestige restores settings with its own, newest restore script, so backups made with older versions get these fixes too (including the background services, which older backups didn't record).
+- Running `Restore-Config.cmd` on its own keeps the administrator window open at the end so you can read the result.
+- `tools\Test-RestoreInSandbox.ps1` tries a restore inside Windows Sandbox, a throwaway copy of Windows, without touching your PC.
+- Adobe presets: the note now points to Photoshop's Migrate Presets for newer versions.
+
 ## 1.2.0
 
 - Faster batch restore: shared runtimes first, then simple silent installers three at a time, then winget, Store and interactive installs, and MSI-based installers one by one at the end. Installers that clash get retried on their own. A new **Install several at once** switch turns this off.

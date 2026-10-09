@@ -12,7 +12,7 @@
   },
   {
     "id": "fancontrol", "name": "FanControl", "app": "^FanControl$",
-    "processes": ["FanControl"],
+    "processes": ["FanControl"], "services": ["FanControl.Service"],
     "installDirFallback": ["%PROGRAMFILES(X86)%\\FanControl", "%PROGRAMFILES%\\FanControl"],
     "items": [
       { "path": "%INSTALLDIR%\\Configurations", "exclude": ["*.deps.json", "*.runtimeconfig.json"] },
@@ -29,7 +29,7 @@
   },
   {
     "id": "wavelink", "name": "Elgato Wave Link", "app": "^Elgato Wave Link$",
-    "processes": ["WaveLink", "WaveLinkSE"],
+    "processes": ["WaveLink", "WaveLinkSE", "Elgato.WaveLink"], "services": ["WavelinkSEService"],
     "items": [ { "path": "%APPDATA%\\Elgato\\WaveLink", "exclude": ["logs", "Downloads", "Marketplace", "*.cache"] } ],
     "registry": ["HKCU\\Software\\Elgato Systems GmbH\\Wave Link"],
     "notes": "Mixes, channel routing and app routing."
@@ -46,7 +46,7 @@
   },
   {
     "id": "icue", "name": "Corsair iCUE", "app": "^Corsair iCUE",
-    "processes": ["iCUE"],
+    "processes": ["iCUE", "iCUEDevicePluginHost"], "services": ["CorsairService"],
     "items": [
       { "path": "%APPDATA%\\Corsair\\CUE5", "exclude": ["logs", "data_cache"] },
       { "path": "%APPDATA%\\Corsair\\CUE4", "exclude": ["logs"] }
@@ -55,18 +55,18 @@
   },
   {
     "id": "ghub", "name": "Logitech G HUB", "app": "^Logitech G HUB",
-    "processes": ["lghub", "lghub_agent", "lghub_system_tray", "lghub_updater"],
+    "processes": ["lghub", "lghub_agent", "lghub_system_tray", "lghub_updater"], "services": ["LGHUBUpdaterService"],
     "items": [ { "path": "%LOCALAPPDATA%\\LGHUB", "exclude": ["logs", "cache", "*.log"] } ],
     "notes": "Device settings, macros and game profiles."
   },
   {
     "id": "nzxtcam", "name": "NZXT CAM", "app": "^NZXT CAM",
-    "processes": ["NZXT CAM"],
+    "processes": ["NZXT CAM"], "services": ["CAMService"],
     "items": [ { "path": "%APPDATA%\\NZXT CAM", "exclude": ["Cache", "Code Cache", "GPUCache", "DawnGraphiteCache", "DawnWebGPUCache", "Crashpad", "logs", "sentry", "blob_storage", "Shared Dictionary", "lockfile"] } ]
   },
   {
     "id": "steelseries", "name": "SteelSeries GG", "app": "^SteelSeries GG",
-    "processes": ["SteelSeriesGG", "SteelSeriesGGClient", "SteelSeriesEngine", "SteelSeriesSonar"],
+    "processes": ["SteelSeriesGG", "SteelSeriesGGClient", "SteelSeriesGGEZ", "SteelSeriesEngine", "SteelSeriesSonar", "SteelSeriesPrism"], "services": ["SteelSeriesGGUpdateServiceProxy"],
     "items": [ { "path": "%PROGRAMDATA%\\SteelSeries\\GG", "exclude": ["Logs", "updates", "*.log"] } ],
     "notes": "Engine and Sonar settings. Restart the PC after restoring."
   },
@@ -181,7 +181,7 @@
       { "path": "%DOCUMENTS%\\Adobe\\Premiere Pro" },
       { "path": "%DOCUMENTS%\\Adobe\\Adobe Media Encoder" }
     ],
-    "notes": "Actions, brushes, workspaces, shortcuts and Camera Raw / Lightroom presets. Restore after Creative Cloud has reinstalled your apps."
+    "notes": "Actions, brushes, workspaces, shortcuts and Camera Raw / Lightroom presets. Restore after Creative Cloud has reinstalled your apps. If a newer Photoshop version doesn't pick them up, use its Migrate Presets option (Edit > Presets) to pull them in from the restored version folder."
   },
   {
     "id": "c4d", "name": "Cinema 4D preferences", "app": "^Maxon Cinema 4D",

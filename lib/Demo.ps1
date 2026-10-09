@@ -217,7 +217,7 @@ function Get-WPDemoConfigs {
         $c.Registry = @($d[5])
         $c.Running = @($d[6])
         $c.Sensitive = [bool]$d[7]
-        if ($prof) { $c.Notes = [string]$prof.notes; $c.Processes = @($prof.processes) }
+        if ($prof) { $c.Notes = [string]$prof.notes; $c.Processes = @($prof.processes); $c.Services = @($prof.services | Where-Object { $_ }) }
         if ($d[0] -eq 'obs-media') { $c.Notes = 'Images, videos and sounds your scenes use, put back at the same paths (3 files or folders).' }
         $c.Selected = (-not $c.Sensitive) -and $c.Bytes -lt 1GB
         $c | Add-Member -NotePropertyName SizeChecked -NotePropertyValue $true -Force
@@ -485,7 +485,7 @@ function Invoke-WPDemoRestore {
             if (Test-WPCancel) { break }
             Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = 'Restoring...'; Level = 'step' }
             Start-Sleep -Milliseconds (200 + $rand.Next(250))
-            $msg = $(if ($test) { "Test run finished for $($c.Name)." } else { "Restored $(2 + $rand.Next(3)) items for $($c.Name)." })
+            $msg = $(if ($test) { "Test run finished for $($c.Name)." } else { "Restored $($c.Name): $(4 + $rand.Next(60)) files checked and in place." })
             Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = $msg; Level = 'ok' }
             Write-WPLog ("{0} settings restored" -f $c.Name) 'ok'
         }

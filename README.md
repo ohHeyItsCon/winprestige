@@ -67,13 +67,23 @@ The restore runs in one batch:
 2. Simple silent installers, three at a time (turn off **Install several at once** to go one by one).
 3. Winget and Microsoft Store installs, and any installer that needs clicking through.
 4. MSI-based installers, one at a time, at the end.
-5. Your app settings and extras.
+5. Your app settings and extras. Each app is closed first, and background services such as FanControl's or NZXT CAM's are paused while its files go back. Every file is then checked against the backup, and anything that didn't land is flagged in yellow.
 
 If an installer clashes with another one running at the same time, it gets retried on its own. Afterwards, use **Open manual links** for anything that needs a manual download, and restart the PC.
 
 If the PC restarts in the middle, WinPrestige opens again after you sign in and offers to **Continue restore** with whatever's left.
 
 If the admin window can't reach a network share, WinPrestige offers to sign in to it for you.
+
+## Trying a restore first
+
+You can rehearse a restore in [Windows Sandbox](https://learn.microsoft.com/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-overview), a throwaway copy of Windows that's deleted when you close it. It needs Windows 10 or 11 Pro or higher. To turn it on, open **Turn Windows features on or off**, tick **Windows Sandbox**, and restart. Then run:
+
+```powershell
+.\tools\Test-RestoreInSandbox.ps1 -BackupPath 'D:\WinPrestige Backup'
+```
+
+The sandbox opens with your backup mapped in read-only and WinPrestige on the Restore screen. Tick a few apps that have a saved installer, plus their settings, and press **Start restore**. Then open those apps in the sandbox and check your settings are there. winget and the Microsoft Store don't work inside the sandbox, and hardware apps can't see your devices there, so test those on the real PC.
 
 ## What's in a backup
 
@@ -92,7 +102,7 @@ Some backups contain private data, such as browser profiles, SSH keys, Wi-Fi pas
 
 ## Adding support for more apps
 
-- [`data/profiles.json`](data/profiles.json) lists where each app keeps its settings. Add an entry with the folders, files or registry keys to copy and the processes to close, and open a pull request.
+- [`data/profiles.json`](data/profiles.json) lists where each app keeps its settings. Add an entry with the folders, files or registry keys to copy, plus the processes to close and background services to pause, and open a pull request.
 - [`data/rules.json`](data/rules.json) decides what counts as a game, launcher, runtime or built-in.
 
 ## Building
