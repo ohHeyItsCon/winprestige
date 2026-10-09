@@ -898,7 +898,7 @@
           </ScrollViewer>
           <StackPanel x:Name="RestoreEmpty" VerticalAlignment="Center" HorizontalAlignment="Center">
             <TextBlock Text="&#xE777;" FontFamily="{StaticResource Icons}" FontSize="36" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"/>
-            <TextBlock Text="Pick a WinPrestige backup folder to restore from." Foreground="{StaticResource Muted}" FontSize="14" Margin="0,12,0,0" HorizontalAlignment="Center"/>
+            <TextBlock Text="Pick a WinPrestige backup folder to restore from, or drag it onto this window." Foreground="{StaticResource Muted}" FontSize="14" Margin="0,12,0,0" HorizontalAlignment="Center"/>
           </StackPanel>
           <ListBox x:Name="RestoreLog" Grid.Row="1" Style="{StaticResource LogList}" Margin="18,0,18,16"/>
         </Grid>

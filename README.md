@@ -58,7 +58,7 @@ Requirements: Windows 10 or 11. winget (App Installer) is used when available; w
 
 Either way works:
 
-- **Freshly downloaded WinPrestige:** it looks for backups on your other drives, USB drives, mapped network shares, and Desktop, Documents and Downloads. If it finds one, press **Restore everything**, or **Review first** to choose what to reinstall. If not, press **Find my backup...** and pick the folder.
+- **Freshly downloaded WinPrestige:** it looks for backups on your other drives, USB drives, mapped network shares, and Desktop, Documents and Downloads. If it finds one, press **Restore everything**, or **Review first** to choose what to reinstall. If not, press **Find my backup...** and pick the folder, or drag the backup folder onto the window.
 - **From the backup itself:** open the backup folder on your NAS or external drive and double-click `Restore.cmd`.
 
 The restore runs in one batch:

@@ -39,7 +39,7 @@ param(
     [string]$Screenshot,
     [ValidateSet('Apps', 'Configs', 'Extras', 'Backup', 'Restore')][string]$ScreenshotTab = 'Apps',
     [int]$ScreenshotWait = 180,
-    [ValidateSet('', 'Backup', 'Restore', 'Banner', 'Review')][string]$ScreenshotAction = '',
+    [ValidateSet('', 'Backup', 'Restore', 'Banner', 'Review', 'Drop')][string]$ScreenshotAction = '',
     [string]$ScreenshotSelect
 )
 
@@ -2055,7 +2055,7 @@ function Start-WPFindBackups {
         if ($Screenshot -and @('Banner', 'Review') -notcontains $ScreenshotAction) { return }
         if ($state.FoundBackups.Count) { Show-WPFoundBanner $state.FoundBackups[0] }
         else {
-            Show-WPBanner 'welcome' 'Just reset this PC?' 'Link the backup folder you made before the reset, on your NAS or an external drive, and WinPrestige reinstalls everything. Or carry on to back up this PC.' 'Find my backup...' 'Back up this PC' 0xE8B7
+            Show-WPBanner 'welcome' 'Just reset this PC?' 'Link the backup folder you made before the reset, on your NAS or an external drive (or drag it onto this window), and WinPrestige reinstalls everything. Or carry on to back up this PC.' 'Find my backup...' 'Back up this PC' 0xE8B7
         }
     } -Quiet
 }
@@ -2072,6 +2072,127 @@ function Initialize-WPRestoreHelpers {
     if ($pr -and -not ($Screenshot -and @('Banner', 'Review') -notcontains $ScreenshotAction)) { Show-WPResumeBanner $pr; return }
     if ($Mode -eq 'Restore' -and $BackupPath) { return }
     Start-WPFindBackups
+}
+
+$FileDropCode = @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Windows.Interop;
+
+namespace WinPrestige
+{
+    // Windows blocks modern (OLE) drag-and-drop from Explorer into windows running as administrator.
+    // The classic WM_DROPFILES message still works once it's allowed through the window's message filter.
+    public static class FileDrop
+    {
+        const int WM_DROPFILES = 0x0233;
+        const uint WM_COPYDATA = 0x004A;
+        const uint WM_COPYGLOBALDATA = 0x0049;
+        const uint MSGFLT_ALLOW = 1;
+
+        [DllImport("shell32.dll")] static extern void DragAcceptFiles(IntPtr hwnd, bool accept);
+        [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern uint DragQueryFile(IntPtr hDrop, uint index, StringBuilder file, uint size);
+        [DllImport("shell32.dll")] static extern void DragFinish(IntPtr hDrop);
+        [DllImport("user32.dll")] static extern bool ChangeWindowMessageFilterEx(IntPtr hwnd, uint msg, uint action, IntPtr info);
+        [DllImport("user32.dll")] static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("kernel32.dll")] static extern IntPtr GlobalAlloc(uint flags, UIntPtr bytes);
+        [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr handle);
+        [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr handle);
+
+        static Action<string[]> onDrop;
+
+        public static void Enable(IntPtr hwnd, Action<string[]> callback)
+        {
+            onDrop = callback;
+            ChangeWindowMessageFilterEx(hwnd, (uint)WM_DROPFILES, MSGFLT_ALLOW, IntPtr.Zero);
+            ChangeWindowMessageFilterEx(hwnd, WM_COPYDATA, MSGFLT_ALLOW, IntPtr.Zero);
+            ChangeWindowMessageFilterEx(hwnd, WM_COPYGLOBALDATA, MSGFLT_ALLOW, IntPtr.Zero);
+            DragAcceptFiles(hwnd, true);
+            HwndSource.FromHwnd(hwnd).AddHook(Hook);
+        }
+
+        static IntPtr Hook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+        {
+            if (msg != WM_DROPFILES) return IntPtr.Zero;
+            uint count = DragQueryFile(wParam, 0xFFFFFFFF, null, 0);
+            string[] files = new string[count];
+            for (uint i = 0; i < count; i++)
+            {
+                StringBuilder sb = new StringBuilder(1024);
+                DragQueryFile(wParam, i, sb, (uint)sb.Capacity);
+                files[i] = sb.ToString();
+            }
+            DragFinish(wParam);
+            handled = true;
+            if (onDrop != null) onDrop(files);
+            return IntPtr.Zero;
+        }
+
+        // Testing aid: posts the same message Explorer sends when files are dropped on the window.
+        public static void SimulateDrop(IntPtr hwnd, string[] files)
+        {
+            byte[] chars = Encoding.Unicode.GetBytes(string.Join("\0", files) + "\0\0");
+            const int header = 20;   // DROPFILES: pFiles, pt.x, pt.y, fNC, fWide
+            IntPtr handle = GlobalAlloc(0x0042, (UIntPtr)(uint)(header + chars.Length));
+            IntPtr p = GlobalLock(handle);
+            Marshal.WriteInt32(p, 0, header);
+            Marshal.WriteInt32(p, 16, 1);
+            Marshal.Copy(chars, 0, IntPtr.Add(p, header), chars.Length);
+            GlobalUnlock(handle);
+            PostMessage(hwnd, WM_DROPFILES, handle, IntPtr.Zero);
+        }
+    }
+}
+"@
+
+function Enable-WPFileDrop {
+    # Compiled once and cached, so later starts don't pay for the compiler.
+    if (-not ('WinPrestige.FileDrop' -as [type])) {
+        $refs = @([Windows.Interop.HwndSource].Assembly.Location, [Windows.Threading.Dispatcher].Assembly.Location)
+        $sha = New-Object Security.Cryptography.SHA1Managed
+        $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($FileDropCode))) -replace '-', '').Substring(0, 12)
+        $dll = Join-Path $script:WP.StateDir "FileDrop-$hash.dll"
+        try {
+            if (-not (Test-Path -LiteralPath $dll)) { Add-Type -TypeDefinition $FileDropCode -ReferencedAssemblies $refs -OutputAssembly $dll -OutputType Library -ErrorAction Stop }
+            if (-not ('WinPrestige.FileDrop' -as [type])) { Add-Type -Path $dll -ErrorAction Stop }
+        } catch {
+            try { Add-Type -TypeDefinition $FileDropCode -ReferencedAssemblies $refs -ErrorAction Stop } catch { return }
+        }
+    }
+    $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
+    [WinPrestige.FileDrop]::Enable($hwnd, [Action[string[]]] { param($files) Invoke-WPDroppedPaths $files })
+}
+
+function Find-WPBackupFolder {
+    # The dropped item itself, a "WinPrestige Backup" folder inside it, or (for the app folder
+    # that sits inside every backup) its parent.
+    param([string]$Path)
+    if (-not $Path) { return $null }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { $Path = Split-Path -Parent $Path }
+    foreach ($c in @($Path, (Join-Path $Path 'WinPrestige Backup'), (Split-Path -Parent $Path))) {
+        if ($c -and (Test-Path -LiteralPath (Join-Path $c 'manifest.json'))) { return $c.TrimEnd('\') }
+    }
+    return $null
+}
+
+function Invoke-WPDroppedPaths {
+    param([string[]]$Paths)
+    $items = @($Paths | Where-Object { $_ })
+    if ($items.Count -eq 0) { return }
+    $backup = Find-WPBackupFolder $items[0]
+    if ($backup) {
+        Hide-WPBanner
+        Import-WPBackup $backup
+        if ($state.Restore) { $ui.TabRestore.IsChecked = $true }
+        return
+    }
+    if ($state.Page -eq 'Configs') {
+        foreach ($p in $items) { Add-WPCustomConfig $p }
+        Set-WPStatus ("Added {0} to App settings." -f $(if ($items.Count -eq 1) { Split-Path -Leaf $items[0] } else { "$($items.Count) items" }))
+        return
+    }
+    Set-WPStatus "That isn't a WinPrestige backup. Drop the backup folder, the one with manifest.json in it."
 }
 
 function Set-WPRunOnce {
@@ -2244,7 +2365,10 @@ function Show-WPPage {
 
 $ui.ModeBackup.Add_Checked({ if ($state.Page -eq 'Restore') { $ui[$state.LastBackupTab].IsChecked = $true }; Move-WPModeThumb })
 $ui.ModeRestore.Add_Checked({ $ui.TabRestore.IsChecked = $true; Move-WPModeThumb })
-$window.Add_ContentRendered({ Move-WPModeThumb -Instant })
+$window.Add_ContentRendered({
+        Move-WPModeThumb -Instant
+        try { Enable-WPFileDrop } catch { }
+    })
 $ui.BtnNextStep.Add_Click({
         $order = @('Apps', 'Configs', 'Extras', 'Backup')
         $i = [array]::IndexOf($order, $state.Page)
@@ -2454,6 +2578,12 @@ if ($Screenshot) {
             $elapsed = ((Get-Date) - $state.ShotStart).TotalSeconds
             if ($elapsed -lt 4) { return }
             if ($state.Jobs.Count -gt 0 -and $elapsed -lt $ScreenshotWait) { return }
+            if ($ScreenshotAction -eq 'Drop' -and -not $state.ShotActionDone) {
+                $state.ShotActionDone = $true
+                $hwnd = (New-Object System.Windows.Interop.WindowInteropHelper $window).Handle
+                [WinPrestige.FileDrop]::SimulateDrop($hwnd, [string[]]@($ScreenshotSelect))
+                return
+            }
             if ($ScreenshotAction -eq 'Review' -and -not $state.ShotActionDone) {
                 $state.ShotActionDone = $true
                 if ($state.BannerKind) { Invoke-WPBannerAction 'secondary' }
@@ -2470,7 +2600,7 @@ if ($Screenshot) {
                 $ui["Tab$ScreenshotTab"].IsChecked = $true
                 $window.UpdateLayout()
                 switch ($ScreenshotTab) { 'Apps' { Update-WPAppLayout } 'Configs' { Update-WPConfigLayout } 'Restore' { Update-WPRestoreLayout } }
-                if ($ScreenshotSelect) {
+                if ($ScreenshotSelect -and $ScreenshotAction -ne 'Drop') {
                     $pick = $state.Apps | Where-Object { $_.Name -eq $ScreenshotSelect } | Select-Object -First 1
                     if ($pick) { Show-WPDetails $pick.Key }
                 }

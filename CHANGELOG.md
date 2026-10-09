@@ -6,6 +6,7 @@
 - A fresh copy of WinPrestige finds backups on other drives, USB drives, mapped network shares, and Desktop, Documents and Downloads, and offers **Restore everything** or **Review first**. First-time users without a backup get a **Find my backup...** prompt.
 - Restores survive restarts: progress is saved after every app, WinPrestige reopens after sign-in, and **Continue restore** picks up with what's left.
 - Recent and found backups appear as one-click chips on the Restore screen.
+- Drag a backup folder onto the window to load it. This works even though WinPrestige runs as administrator, which normally blocks drag-and-drop from Explorer. On the App settings step, dropped folders and files are added to the backup.
 
 ## 1.1.0
 
