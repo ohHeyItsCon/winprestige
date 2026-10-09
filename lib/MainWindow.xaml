@@ -571,6 +571,7 @@
     <Grid.RowDefinitions>
       <RowDefinition Height="Auto"/>
       <RowDefinition Height="Auto"/>
+      <RowDefinition Height="Auto"/>
       <RowDefinition Height="*"/>
       <RowDefinition Height="Auto"/>
     </Grid.RowDefinitions>
@@ -647,7 +648,29 @@
       </DockPanel>
     </Border>
 
-    <Grid Grid.Row="2">
+    <!-- Banner: found a backup / continue an unfinished restore / first-run welcome -->
+    <Border x:Name="Banner" Grid.Row="2" Margin="18,14,18,2" CornerRadius="12" BorderThickness="1.5"
+            BorderBrush="{StaticResource BrandStripe}" Background="{StaticResource Panel}" Padding="16,12" Visibility="Collapsed">
+      <DockPanel>
+        <Border DockPanel.Dock="Left" Width="42" Height="42" CornerRadius="11" Background="{StaticResource Brand}" Margin="0,0,14,0" VerticalAlignment="Center">
+          <TextBlock x:Name="BannerIcon" Text="&#xE777;" FontFamily="{StaticResource Icons}" FontSize="19" Foreground="{StaticResource Ink}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+          <Button x:Name="BannerPrimary" Style="{StaticResource BtnPrimary}" Margin="0,0,8,0" Padding="16,9" Content="Restore everything"/>
+          <Button x:Name="BannerSecondary" Style="{StaticResource Btn}" Margin="0,0,4,0" Padding="14,9" Content="Review first"/>
+          <Button x:Name="BannerClose" Style="{StaticResource BtnGhost}" Margin="0" Padding="10,9" ToolTip="Dismiss">
+            <TextBlock Text="&#xE711;" FontFamily="{StaticResource Icons}" FontSize="11"/>
+          </Button>
+        </StackPanel>
+        <StackPanel VerticalAlignment="Center">
+          <TextBlock x:Name="BannerTitle" FontSize="14.5" FontWeight="SemiBold" TextWrapping="Wrap"/>
+          <TextBlock x:Name="BannerText" FontSize="12.5" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+        </StackPanel>
+      </DockPanel>
+    </Border>
+
+    <Grid Grid.Row="3">
       <!-- APPS -->
       <Grid x:Name="PageApps">
         <Grid.ColumnDefinitions>
@@ -835,13 +858,16 @@
                   <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Load"/></StackPanel>
                 </Button>
               </StackPanel>
-              <TextBlock x:Name="RestoreInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,8,0,0"/>
+              <WrapPanel x:Name="RestoreChips" Margin="0,8,0,0"/>
+              <TextBlock x:Name="RestoreInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,4,0,0"/>
               <TextBlock Text="OPTIONS" Style="{StaticResource SideLabel}"/>
               <StackPanel Margin="10,0,4,0">
                 <CheckBox x:Name="OptSkipInstalled" Style="{StaticResource Switch}" Content="Skip apps already installed" IsChecked="True"/>
                 <CheckBox x:Name="OptPreferLocal" Style="{StaticResource Switch}" Content="Use saved installers" IsChecked="True"/>
                 <CheckBox x:Name="OptOnlineFallback" Style="{StaticResource Switch}" Content="Fall back to winget online" IsChecked="True"/>
                 <CheckBox x:Name="OptSilent" Style="{StaticResource Switch}" Content="Silent installs" IsChecked="True"/>
+                <CheckBox x:Name="OptParallel" Style="{StaticResource Switch}" Content="Install several at once" IsChecked="True"
+                          ToolTip="Runs up to 3 simple installers side by side. MSI-based installers still run one at a time, at the end."/>
                 <CheckBox x:Name="OptTestRun" Style="{StaticResource Switch}" Content="Test run (change nothing)"/>
               </StackPanel>
               <Button x:Name="BtnStartRestore" Style="{StaticResource BtnPrimary}" Margin="0,16,0,8" Padding="12,10">
@@ -856,7 +882,7 @@
               <Button x:Name="BtnOpenRestoreReport" Style="{StaticResource BtnGhost}">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open report"/></StackPanel>
               </Button>
-              <Border Background="{StaticResource Panel2}" CornerRadius="12" Padding="14,13" Margin="0,16,0,0">
+              <Border x:Name="RestoreSummaryCard" Background="{StaticResource Panel2}" CornerRadius="12" Padding="14,13" Margin="0,16,0,0" Visibility="Collapsed">
                 <StackPanel x:Name="RestoreSummary"/>
               </Border>
             </StackPanel>
@@ -880,7 +906,7 @@
     </Grid>
 
     <!-- Status bar -->
-    <Border Grid.Row="3" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="18,7">
+    <Border Grid.Row="4" Background="{StaticResource Panel}" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="18,7">
       <DockPanel LastChildFill="True">
         <Button x:Name="BtnCancel" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="10,0,0,0" Padding="12,3" Visibility="Collapsed" Content="Cancel"/>
         <ProgressBar x:Name="Progress" DockPanel.Dock="Right" Style="{StaticResource Thin}" Width="240" Margin="12,0,0,0" Visibility="Collapsed" Maximum="1"/>

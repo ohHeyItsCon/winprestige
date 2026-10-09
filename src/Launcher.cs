@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Back up your apps and settings before a Windows reset, then restore them.")]
 [assembly: AssemblyCompany("ohHeyItsCon")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 Connor. MIT License.")]
-[assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyVersion("1.2.0.0")]
+[assembly: AssemblyFileVersion("1.2.0.0")]
 
 static class Program
 {

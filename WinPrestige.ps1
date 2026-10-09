@@ -22,6 +22,9 @@
     Show a made-up PC full of well-known apps instead of this one, for screenshots and videos.
     Nothing on this PC is read or changed, and backup and restore are simulated.
 
+.PARAMETER Resume
+    Offer to continue an unfinished restore (used when Windows reopens WinPrestige after a restart).
+
 .PARAMETER Screenshot
     Testing aid: once background work finishes, render the window to this PNG and exit.
 #>
@@ -31,11 +34,12 @@ param(
     [string]$BackupPath,
     [switch]$NoElevate,
     [switch]$Demo,
+    [switch]$Resume,
     [switch]$HideConsole,
     [string]$Screenshot,
     [ValidateSet('Apps', 'Configs', 'Extras', 'Backup', 'Restore')][string]$ScreenshotTab = 'Apps',
     [int]$ScreenshotWait = 180,
-    [ValidateSet('', 'Backup', 'Restore')][string]$ScreenshotAction = '',
+    [ValidateSet('', 'Backup', 'Restore', 'Banner', 'Review')][string]$ScreenshotAction = '',
     [string]$ScreenshotSelect
 )
 
@@ -81,6 +85,7 @@ if (-not $NoElevate -and -not $Screenshot -and -not $Demo -and -not (Test-WPAdmi
         }
     }
     $argList = "-NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $selfDir 'WinPrestige.ps1')`" -Mode $Mode"
+    if ($Resume) { $argList += ' -Resume' }
     if ($BackupPath) {
         $bp = $BackupPath
         try { $bp = (Resolve-Path -LiteralPath $BackupPath -ErrorAction Stop).ProviderPath } catch { }
@@ -123,9 +128,11 @@ $AvatarColors = @('#4CDBDA', '#7B9CE9', '#C094F0', '#5FCFE3', '#3DDC97', '#F2B24
 #region Settings ---------------------------------------------------------------
 
 $SettingsPath = Join-Path $script:WP.StateDir 'settings.json'
+# No settings yet means WinPrestige has never run on this PC, which is the "just reset" case.
+$FirstRun = $Demo -or -not (Test-Path -LiteralPath $SettingsPath)
 
 function Get-WPSettings {
-    $s = @{ Destination = ''; Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{} }
+    $s = @{ Destination = ''; Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{}; RecentBackups = @() }
     if ($Demo) { return $s }
     $raw = $null
     try { $raw = Read-WPJson $SettingsPath } catch { }
@@ -135,6 +142,7 @@ function Get-WPSettings {
             if ($raw.$k) { $s[$k] = ConvertTo-WPHashtable $raw.$k }
         }
         if ($raw.CustomConfigs) { $s.CustomConfigs = @(foreach ($c in $raw.CustomConfigs) { $c }) }
+        if ($raw.RecentBackups) { $s.RecentBackups = @(foreach ($b in $raw.RecentBackups) { $b }) }
     }
     return $s
 }
@@ -177,6 +185,7 @@ $state = @{
     AppCols = 0; ConfigCols = 0; RestoreCols = 0
     Restore = $null; RestoreRoot = ''; RRows = @{}; RestoreSel = @{}
     Dirty = @{}; LastReport = ''; GroupChecks = @{}; LastBackupTab = 'TabApps'; SummaryLast = @{}; WasBusy = $false
+    FoundBackups = @(); BannerKind = ''; BannerBackup = $null; BannerProgress = $null
     LogFile = Join-Path $script:WP.StateDir ("winprestige-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
 }
 
@@ -553,7 +562,7 @@ function Test-WPFilter {
 #region Background jobs --------------------------------------------------------
 
 function Set-WPBusy {
-    $busy = $state.Jobs.Count -gt 0
+    $busy = @($state.Jobs | Where-Object { -not $_.Quiet }).Count -gt 0
     $vis = if ($busy) { 'Visible' } else { 'Collapsed' }
     $ui.BtnCancel.Visibility = $vis
     $ui.Progress.Visibility = $vis
@@ -575,7 +584,7 @@ function Set-WPBusy {
 }
 
 function Start-WPJob {
-    param([string]$Name, [scriptblock]$Script, [hashtable]$Params = @{}, [scriptblock]$OnDone)
+    param([string]$Name, [scriptblock]$Script, [hashtable]$Params = @{}, [scriptblock]$OnDone, [switch]$Quiet)
     if ($state.Jobs.Count -eq 0) { $sync.Cancel = $false }
     $rs = [runspacefactory]::CreateRunspace()
     $rs.ApartmentState = 'STA'
@@ -586,7 +595,7 @@ function Start-WPJob {
     $code = "param(`$sync, `$WPRoot, `$P)`n`$ErrorActionPreference = 'Continue'`n. (Join-Path `$WPRoot 'lib\Core.ps1')`nInitialize-WP -Root `$WPRoot -Sync `$sync`n. (Join-Path `$WPRoot 'lib\Demo.ps1')`n" + $Script.ToString()
     [void]$ps.AddScript($code).AddArgument($sync).AddArgument($WPRoot).AddArgument($Params)
     $handle = $ps.BeginInvoke()
-    [void]$state.Jobs.Add(@{ Name = $Name; PS = $ps; Handle = $handle; Runspace = $rs; OnDone = $OnDone })
+    [void]$state.Jobs.Add(@{ Name = $Name; PS = $ps; Handle = $handle; Runspace = $rs; OnDone = $OnDone; Quiet = [bool]$Quiet })
     Set-WPBusy
 }
 
@@ -1885,8 +1894,196 @@ function Import-WPBackup {
     if (-not $script:WP.Winget) { $info += ' winget is not ready yet, so only saved installers work. Update "App Installer" from the Microsoft Store, or wait a few minutes after first sign-in.' }
     $ui.RestoreInfo.Text = $info
     $ui.RestoreInfo.Foreground = Get-WPBrush $Palette.Muted
-    $state.Settings.LastRestore = $path
+    if (-not $Demo) { Add-WPRecentBackup $path ([string]$m.computer) ([string]$m.created) }
+    Update-WPRestoreChips
     Update-WPRestoreLayout
+}
+
+function Format-WPBackupDate {
+    param([string]$Created, [switch]$Short)
+    try {
+        $d = [datetime]$Created
+        if ($Short) { return $d.ToString('d MMM') }
+        return $d.ToString('d MMM yyyy, HH:mm')
+    } catch { return '' }
+}
+
+function Add-WPRecentBackup {
+    param([string]$Path, [string]$Computer, [string]$Created)
+    $list = @([pscustomobject]@{ Path = $Path; Computer = $Computer; Created = $Created })
+    foreach ($b in @($state.Settings.RecentBackups)) { if ($b -and $b.Path -and $b.Path -ne $Path) { $list += $b } }
+    $state.Settings.RecentBackups = @($list | Select-Object -First 5)
+    Save-WPSettings
+}
+
+function Update-WPRestoreChips {
+    # Shortcuts to recently loaded and automatically found backups.
+    $ui.RestoreChips.Children.Clear()
+    $items = @()
+    $seen = @{}
+    foreach ($b in (@($state.Settings.RecentBackups) + @($state.FoundBackups))) {
+        if (-not $b -or -not $b.Path) { continue }
+        $k = ([string]$b.Path).ToLowerInvariant()
+        if ($seen.ContainsKey($k)) { continue }
+        $seen[$k] = $true
+        $items += $b
+    }
+    foreach ($b in @($items | Select-Object -First 5)) {
+        $btn = New-Object Windows.Controls.Button
+        $btn.Style = $window.FindResource('Btn')
+        $btn.Padding = '9,4'
+        $btn.Margin = '0,0,6,6'
+        $btn.FontSize = 11.5
+        $label = [string]$b.Computer
+        if (-not $label) { $label = Split-Path -Leaf $b.Path }
+        $when = Format-WPBackupDate $b.Created -Short
+        if ($when) { $label = "$label  $MidDot  $when" }
+        $btn.Content = $label
+        $btn.ToolTip = [string]$b.Path
+        $btn.Tag = [string]$b.Path
+        $btn.Add_Click({ Hide-WPBanner; Import-WPBackup $this.Tag })
+        [void]$ui.RestoreChips.Children.Add($btn)
+    }
+    if ($items.Count) { $ui.RestoreChips.Visibility = 'Visible' } else { $ui.RestoreChips.Visibility = 'Collapsed' }
+}
+
+function Show-WPBanner {
+    param([string]$Kind, [string]$Title, [string]$Text, [string]$Primary, [string]$Secondary, [int]$Glyph = 0xE777)
+    $state.BannerKind = $Kind
+    $ui.BannerTitle.Text = $Title
+    $ui.BannerText.Text = $Text
+    $ui.BannerPrimary.Content = $Primary
+    $ui.BannerSecondary.Content = $Secondary
+    if ($Secondary) { $ui.BannerSecondary.Visibility = 'Visible' } else { $ui.BannerSecondary.Visibility = 'Collapsed' }
+    $ui.BannerIcon.Text = [string][char]$Glyph
+    $ui.Banner.Visibility = 'Visible'
+    Invoke-WPFadeIn $ui.Banner 8 260
+}
+
+function Hide-WPBanner {
+    $ui.Banner.Visibility = 'Collapsed'
+    $state.BannerKind = ''
+}
+
+function Show-WPFoundBanner {
+    param($Backup)
+    $state.BannerBackup = $Backup
+    $when = Format-WPBackupDate $Backup.Created
+    $text = "Made {0}: {1} apps and {2} app settings, in {3}. Just reset this PC? Put it all back in one go." -f $when, $Backup.Apps, $Backup.Configs, $Backup.Path
+    Show-WPBanner 'found' ("Found a backup of {0}" -f $Backup.Computer) $text 'Restore everything' 'Review first'
+}
+
+function Show-WPResumeBanner {
+    param($Progress)
+    $state.BannerProgress = $Progress
+    $doneMap = ConvertTo-WPHashtable $Progress.done
+    $finished = @($doneMap.Values | Where-Object { @('ok', 'manual', 'skipped') -contains $_ }).Count
+    $pc = [string]$Progress.computer
+    if (-not $pc) { $pc = 'your PC' }
+    Show-WPBanner 'resume' ("Your restore of {0} is {1} of {2} done" -f $pc, $finished, $Progress.total) 'It stopped before it finished, usually because of a restart. Pick up where it left off; anything already installed is skipped.' 'Continue restore' 'Review first' 0xE768
+}
+
+function Set-WPResumeSelection {
+    # Ticks only what's left from an interrupted restore and shows what happened to the rest.
+    param($Progress)
+    $doneMap = ConvertTo-WPHashtable $Progress.done
+    $sel = @{}
+    foreach ($k in @($Progress.selected.apps)) { if ($k) { $sel[[string]$k] = $true } }
+    foreach ($k in @($Progress.selected.configs)) { if ($k) { $sel['config:' + $k] = $true } }
+    foreach ($k in @($Progress.selected.extras)) { if ($k) { $sel['extra:' + $k] = $true } }
+    foreach ($key in @($state.RRows.Keys)) {
+        $was = [string]$doneMap[$key]
+        $want = $sel.ContainsKey($key) -and (@('ok', 'manual', 'skipped') -notcontains $was)
+        $state.RestoreSel[$key] = $want
+        $state.RRows[$key].Check.IsChecked = $want
+        switch ($was) {
+            'ok' { Update-WPRestoreStatus $key 'Installed before the restart' 'ok' }
+            'skipped' { Update-WPRestoreStatus $key 'Already installed' 'info' }
+            'manual' { Update-WPRestoreStatus $key 'Needs a manual download' 'warn' }
+            'failed' { Update-WPRestoreStatus $key 'Failed last time; will try again' 'warn' }
+        }
+    }
+    Update-WPRestoreSummary
+}
+
+function Invoke-WPBannerAction {
+    param([string]$Which)
+    $kind = $state.BannerKind
+    Hide-WPBanner
+    switch ($kind) {
+        'found' {
+            Import-WPBackup $state.BannerBackup.Path
+            if (-not $state.Restore) { return }
+            $ui.TabRestore.IsChecked = $true
+            if ($Which -eq 'primary') { Start-WPRestore -NoConfirm }
+        }
+        'resume' {
+            $pr = $state.BannerProgress
+            Import-WPBackup ([string]$pr.backup)
+            if (-not $state.Restore) { return }
+            Set-WPResumeSelection $pr
+            $ui.TabRestore.IsChecked = $true
+            if ($Which -eq 'primary') { Start-WPRestore -NoConfirm -Progress $pr }
+        }
+        'welcome' {
+            if ($Which -ne 'primary') { return }
+            $d = New-Object System.Windows.Forms.FolderBrowserDialog
+            $d.Description = 'Pick the WinPrestige backup folder you made before the reset (the one with manifest.json in it).'
+            if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+                Import-WPBackup $d.SelectedPath
+                if ($state.Restore) { $ui.TabRestore.IsChecked = $true }
+            }
+        }
+    }
+}
+
+function Start-WPFindBackups {
+    # Looks for backups in the background so the window stays responsive.
+    $extra = @()
+    $parent = Split-Path -Parent $WPRoot
+    if ($parent) { $extra += $parent }
+    $extra += @($state.Settings.RecentBackups | ForEach-Object { if ($_) { [string]$_.Path } })
+    Start-WPJob 'FindBackups' {
+        @{ Found = @(Find-WPBackups $P.Extra) }
+    } @{ Extra = @($extra) } {
+        param($r, $err)
+        $state.FoundBackups = @()
+        if ($r) { $state.FoundBackups = @($r.Found | Where-Object { $_ }) }
+        Update-WPRestoreChips
+        if (-not $ui.RestorePath.Text -and $state.FoundBackups.Count) { $ui.RestorePath.Text = [string]$state.FoundBackups[0].Path }
+        if (-not $FirstRun -or $state.Restore -or $state.Page -eq 'Restore' -or $state.BannerKind) { return }
+        if ($Screenshot -and @('Banner', 'Review') -notcontains $ScreenshotAction) { return }
+        if ($state.FoundBackups.Count) { Show-WPFoundBanner $state.FoundBackups[0] }
+        else {
+            Show-WPBanner 'welcome' 'Just reset this PC?' 'Link the backup folder you made before the reset, on your NAS or an external drive, and WinPrestige reinstalls everything. Or carry on to back up this PC.' 'Find my backup...' 'Back up this PC' 0xE8B7
+        }
+    } -Quiet
+}
+
+function Initialize-WPRestoreHelpers {
+    Update-WPRestoreChips
+    if ($Demo) {
+        $state.FoundBackups = @(Find-WPDemoBackups)
+        Update-WPRestoreChips
+        if ($Mode -ne 'Restore' -and (-not $Screenshot -or @('Banner', 'Review') -contains $ScreenshotAction)) { Show-WPFoundBanner $state.FoundBackups[0] }
+        return
+    }
+    $pr = Get-WPRestoreProgress
+    if ($pr -and -not ($Screenshot -and @('Banner', 'Review') -notcontains $ScreenshotAction)) { Show-WPResumeBanner $pr; return }
+    if ($Mode -eq 'Restore' -and $BackupPath) { return }
+    Start-WPFindBackups
+}
+
+function Set-WPRunOnce {
+    # If Windows restarts mid-restore, reopen WinPrestige after sign-in so it can offer to continue.
+    $exe = Join-Path $WPRoot 'WinPrestige.exe'
+    if (Test-Path -LiteralPath $exe) { $cmd = "`"$exe`" -Mode Restore -Resume" }
+    else { $cmd = "`"$env:windir\System32\WindowsPowerShell\v1.0\powershell.exe`" -NoProfile -ExecutionPolicy Bypass -STA -WindowStyle Hidden -File `"$(Join-Path $WPRoot 'WinPrestige.ps1')`" -Mode Restore -Resume" }
+    try { New-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'WinPrestige' -Value $cmd -PropertyType String -Force | Out-Null } catch { }
+}
+
+function Remove-WPRunOnce {
+    try { Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce' -Name 'WinPrestige' -ErrorAction Stop } catch { }
 }
 
 function Confirm-WPReadable {
@@ -1923,7 +2120,8 @@ function Update-WPRestoreLayout {
 }
 
 function Update-WPRestoreSummary {
-    if (-not $state.Restore) { $ui.RestoreSummary.Children.Clear(); return }
+    if (-not $state.Restore) { $ui.RestoreSummary.Children.Clear(); $ui.RestoreSummaryCard.Visibility = 'Collapsed'; return }
+    $ui.RestoreSummaryCard.Visibility = 'Visible'
     $all = @($state.Restore.apps | Where-Object { $_.Selected -and $_.Category -ne 'games' -and $_.Category -ne 'system' })
     $apps = @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and $_.Category -ne 'games' })
     $counts = @{}
@@ -1944,13 +2142,18 @@ function Update-WPRestoreSummary {
 }
 
 function Start-WPRestore {
+    param([switch]$NoConfirm, $Progress)
     if (-not $state.Restore) { [void][System.Windows.MessageBox]::Show($window, 'Load a backup folder first.', 'WinPrestige'); return }
+    Hide-WPBanner
     $entries = @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and $_.Category -ne 'games' })
     $configs = @($state.Restore.configs | Where-Object { $state.RestoreSel['config:' + $_.Id] })
     $extras = @($state.Restore.extras | Where-Object { $state.RestoreSel['extra:' + $_.Id] })
     $test = [bool]$ui.OptTestRun.IsChecked
-    if (-not $test -and -not $Screenshot) {
-        $ans = [System.Windows.MessageBox]::Show($window, "Install $($entries.Count) apps, then restore $($configs.Count) app settings and $($extras.Count) extras?`n`nInstallers run one after another. Leave the PC alone until it finishes; some may still show a window.", 'WinPrestige', 'OKCancel', 'Question')
+    $parallel = [bool]$ui.OptParallel.IsChecked -and [bool]$ui.OptSilent.IsChecked
+    if (-not $test -and -not $Screenshot -and -not $NoConfirm) {
+        $how = 'Installers run one after another.'
+        if ($parallel) { $how = 'Simple installers run three at a time; MSI-based ones run one by one at the end.' }
+        $ans = [System.Windows.MessageBox]::Show($window, "Install $($entries.Count) apps, then restore $($configs.Count) app settings and $($extras.Count) extras?`n`n$how Leave the PC alone until it finishes; some installers may still show a window.", 'WinPrestige', 'OKCancel', 'Question')
         if ($ans -ne 'OK') { return }
     }
     $ui.RestoreLog.Items.Clear()
@@ -1960,16 +2163,25 @@ function Start-WPRestore {
     $opts = @{
         TestRun = $test; SkipInstalled = [bool]$ui.OptSkipInstalled.IsChecked; PreferLocal = [bool]$ui.OptPreferLocal.IsChecked
         OnlineFallback = [bool]$ui.OptOnlineFallback.IsChecked; Silent = [bool]$ui.OptSilent.IsChecked
+        Parallel = $parallel; Computer = [string]$state.Restore.computer; Progress = $Progress
     }
+    if (-not $test -and -not $Demo) { Set-WPRunOnce }
     Start-WPJob 'Restore' {
         if ($P.Demo) { Invoke-WPDemoRestore $P.Root $P.Entries $P.Configs $P.Extras $P.Dependencies $P.Options }
         else { Invoke-WPRestore $P.Root $P.Entries $P.Configs $P.Extras $P.Dependencies $P.Options }
     } @{ Root = $state.RestoreRoot; Entries = $entries; Configs = $configs; Extras = $extras; Dependencies = @($state.Restore.dependencies); Options = $opts; Demo = [bool]$Demo } {
         param($r, $err)
+        if (-not $Demo) { Remove-WPRunOnce }
+        if ($r -and -not $r.Complete) {
+            Set-WPStatus 'Restore stopped. Open WinPrestige again any time to continue where it left off.'
+            return
+        }
         if ($r -and -not $state.RestoreTestRun -and -not $Screenshot) {
             $msg = "Restore finished: $($r.Ok) installed, $($r.Skipped) already there, $($r.Manual) manual, $($r.Failed) failed."
             Set-WPStatus $msg
-            [void][System.Windows.MessageBox]::Show($window, "$msg`n`nUse 'Open manual links' for the rest, then restart the PC so drivers and hardware apps pick up their settings.", 'WinPrestige')
+            $next = "Use 'Open manual links' for the rest, then restart the PC so drivers and hardware apps pick up their settings."
+            if ($r.RestartNeeded) { $next = "Some installers need a restart to finish. Use 'Open manual links' for the rest, then restart the PC." }
+            [void][System.Windows.MessageBox]::Show($window, "$msg`n`n$next", 'WinPrestige')
         }
     }
 }
@@ -2153,6 +2365,13 @@ $ui.BtnOpenRestoreReport.Add_Click({
         }
     })
 
+$ui.BannerPrimary.Add_Click({ Invoke-WPBannerAction 'primary' })
+$ui.BannerSecondary.Add_Click({ Invoke-WPBannerAction 'secondary' })
+$ui.BannerClose.Add_Click({
+        if ($state.BannerKind -eq 'resume') { Clear-WPRestoreProgress }
+        Hide-WPBanner
+    })
+
 $ui.BtnCancel.Add_Click({
         $sync.Cancel = $true
         $ui.BtnCancel.IsEnabled = $false
@@ -2204,6 +2423,7 @@ $window.Add_Loaded({
         if (-not $script:WP.Winget) { Set-WPStatus 'winget was not found. Update "App Installer" from the Microsoft Store for the best results.' }
         $timer.Start()
         Invoke-WPFadeIn $window.Content 8 320
+        Initialize-WPRestoreHelpers
         if ($Mode -eq 'Restore') {
             $ui.TabRestore.IsChecked = $true
             $ui.AppEmptyText.Text = 'Press "Scan this PC" to list the apps on this computer.'
@@ -2234,7 +2454,12 @@ if ($Screenshot) {
             $elapsed = ((Get-Date) - $state.ShotStart).TotalSeconds
             if ($elapsed -lt 4) { return }
             if ($state.Jobs.Count -gt 0 -and $elapsed -lt $ScreenshotWait) { return }
-            if ($ScreenshotAction -and -not $state.ShotActionDone) {
+            if ($ScreenshotAction -eq 'Review' -and -not $state.ShotActionDone) {
+                $state.ShotActionDone = $true
+                if ($state.BannerKind) { Invoke-WPBannerAction 'secondary' }
+                return
+            }
+            if (@('Backup', 'Restore') -contains $ScreenshotAction -and -not $state.ShotActionDone) {
                 $state.ShotActionDone = $true
                 if ($ScreenshotAction -eq 'Backup') { $ui.TabBackup.IsChecked = $true; Start-WPBackup }
                 else { $ui.TabRestore.IsChecked = $true; Start-WPRestore }

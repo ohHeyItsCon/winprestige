@@ -16,7 +16,7 @@ function Initialize-WP {
         $Sync
     )
     $script:WP.Root = $Root
-    $script:WP.Version = '1.1.0'
+    $script:WP.Version = '1.2.0'
     $script:WP.StateDir = Join-Path $env:LOCALAPPDATA 'WinPrestige'
     if (-not (Test-Path -LiteralPath $script:WP.StateDir)) {
         New-Item -ItemType Directory -Path $script:WP.StateDir -Force | Out-Null
@@ -1749,14 +1749,14 @@ function Get-WPSilentArgs {
     return ''
 }
 
-function Install-WPLocal {
-    # Runs a saved installer. It is copied to local temp first because some installers
-    # misbehave when started from a network share.
+function Start-WPLocalInstall {
+    # Copies a saved installer to local temp (some installers misbehave when run from a network share)
+    # and starts it without waiting. Finish with Complete-WPLocalInstall, or use Install-WPLocal to wait.
     param($Download, [string]$Folder, [switch]$Interactive)
     $src = Join-Path $Folder $Download.Installer
-    if (-not (Test-Path -LiteralPath $src)) { return @{ Ok = $false; Detail = 'Installer file is missing from the backup.' } }
+    if (-not (Test-Path -LiteralPath $src)) { return @{ Done = $true; Ok = $false; Detail = 'Installer file is missing from the backup.' } }
     $type = ([string]$Download.Type).ToLowerInvariant()
-    if (@('zip', 'portable') -contains $type) { return @{ Ok = $false; Detail = 'Portable/zip package; installing it with winget instead.' } }
+    if (@('zip', 'portable') -contains $type) { return @{ Done = $true; Ok = $false; Detail = 'Portable/zip package; installing it with winget instead.' } }
     $work = Join-Path $env:TEMP ('WinPrestige\' + (Get-WPSafeName ([string]$Download.Folder)))
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $file = Join-Path $work $Download.Installer
@@ -1764,8 +1764,8 @@ function Install-WPLocal {
     Unblock-File -LiteralPath $file -ErrorAction SilentlyContinue
 
     if (@('msix', 'appx') -contains $type -or $file -match '\.(msix|msixbundle|appx|appxbundle)$') {
-        try { Add-AppxPackage -Path $file -ForceApplicationShutdown -ErrorAction Stop; return @{ Ok = $true; Detail = 'Installed' } }
-        catch { return @{ Ok = $false; Detail = $_.Exception.Message } }
+        try { Add-AppxPackage -Path $file -ForceApplicationShutdown -ErrorAction Stop; return @{ Done = $true; Ok = $true; Detail = 'Installed' } }
+        catch { return @{ Done = $true; Ok = $false; Detail = $_.Exception.Message } }
     }
 
     $silent = ''
@@ -1778,35 +1778,81 @@ function Install-WPLocal {
         $exe = $file
         $argText = ("$silent $custom").Trim()
     }
-    $ranInteractive = $Interactive -or (-not $silent)
     try {
         if ($argText) { $p = Start-Process -FilePath $exe -ArgumentList $argText -PassThru -ErrorAction Stop }
         else { $p = Start-Process -FilePath $exe -PassThru -ErrorAction Stop }
-    } catch { return @{ Ok = $false; Detail = $_.Exception.Message } }
-    $script:WP.CurrentProcess = $p
-    $deadline = (Get-Date).AddMinutes(60)
-    # Wait for the installer itself only; many installers launch the app when they finish.
-    while (-not $p.WaitForExit(500)) {
-        if (Test-WPCancel) { try { $p.Kill() } catch { }; return @{ Ok = $false; Detail = 'Cancelled' } }
-        if ((Get-Date) -gt $deadline) { return @{ Ok = $false; Detail = 'Installer is still running after an hour; moving on.' } }
+        $null = $p.Handle   # opening the handle now keeps ExitCode readable after the process exits
+    } catch { return @{ Done = $true; Ok = $false; Detail = $_.Exception.Message } }
+    return @{
+        Done = $false; Process = $p; Download = $Download; Started = (Get-Date)
+        RanInteractive = ([bool]$Interactive -or -not $silent); AskedInteractive = [bool]$Interactive
     }
-    $script:WP.CurrentProcess = $null
-    $code = $p.ExitCode
-    $okCodes = @(0, 3010, 1641)
+}
+
+function Complete-WPLocalInstall {
+    param($Handle)
+    $code = $Handle.Process.ExitCode
     $response = $null
-    if ($Download.Codes) {
-        $codes = ConvertTo-WPHashtable $Download.Codes
+    if ($Handle.Download.Codes) {
+        $codes = ConvertTo-WPHashtable $Handle.Download.Codes
         $response = $codes["$code"]
     }
-    if ($okCodes -contains $code -or @('rebootRequiredToFinish', 'rebootRequiredForInstall', 'rebootInitiated', 'alreadyInstalled') -contains $response) {
+    if (@(0, 3010, 1641) -contains $code -or @('rebootRequiredToFinish', 'rebootRequiredForInstall', 'rebootInitiated', 'alreadyInstalled') -contains $response) {
         $detail = 'Installed'
         if (@(3010, 1641) -contains $code -or $response -like 'reboot*') { $detail = 'Installed (restart needed)' }
-        if ($ranInteractive -and -not $Interactive) { $detail += ' - no silent switch known, so it ran normally' }
+        if ($Handle.RanInteractive -and -not $Handle.AskedInteractive) { $detail += ' - no silent switch known, so it ran normally' }
         return @{ Ok = $true; Detail = $detail }
     }
     $why = "Installer exit code $code"
-    if ($response) { $why += " ($response)" }
-    return @{ Ok = $false; Detail = $why }
+    if ($code -eq 1618) { $why = 'Another installer was running at the same time' }
+    elseif ($response) { $why += " ($response)" }
+    return @{ Ok = $false; Detail = $why; Code = $code }
+}
+
+function Install-WPLocal {
+    # Runs a saved installer and waits for it (but not for apps it launches when it finishes).
+    param($Download, [string]$Folder, [switch]$Interactive)
+    $h = Start-WPLocalInstall $Download $Folder -Interactive:$Interactive
+    if ($h.Done) { return @{ Ok = $h.Ok; Detail = $h.Detail } }
+    $script:WP.CurrentProcess = $h.Process
+    $deadline = (Get-Date).AddMinutes(60)
+    while (-not $h.Process.WaitForExit(500)) {
+        if (Test-WPCancel) { try { $h.Process.Kill() } catch { }; return @{ Ok = $false; Detail = 'Cancelled' } }
+        if ((Get-Date) -gt $deadline) { return @{ Ok = $false; Detail = 'Installer is still running after an hour; moving on.' } }
+    }
+    $script:WP.CurrentProcess = $null
+    return (Complete-WPLocalInstall $h)
+}
+
+function Get-WPInstallLane {
+    # Which part of the restore an app goes in. Silent non-MSI installers can run side by side.
+    # MSI-based ones (msi, wix, burn) share Windows Installer's one-at-a-time lock, so they go last.
+    param($Entry, [hashtable]$Options)
+    switch ($Entry.Method) {
+        'local' {
+            $type = ([string]$Entry.Download.Type).ToLowerInvariant()
+            if (@('msi', 'wix', 'burn') -contains $type -or [string]$Entry.Download.Installer -match '\.msi$') { return 'msi' }
+            if (-not $Options.Silent) { return 'one' }
+            if (@('inno', 'nullsoft') -contains $type) { return 'parallel' }
+            if ($type -eq 'exe' -and $Entry.Download.Silent) { return 'parallel' }
+            return 'one'
+        }
+        'winget' { return 'one' }
+        'store' { return 'one' }
+    }
+    return 'manual'
+}
+
+function Install-WPDependency {
+    param([string]$Id, [string]$BackupRoot, $DepIndex, $Installed, [switch]$TestRun)
+    if ($Installed -and $Installed.Ids[$Id.ToLowerInvariant()]) { return }
+    if ($TestRun) { Write-WPLog "  would install dependency $Id first" 'info'; return }
+    Write-WPLog "  installing dependency $Id" 'info'
+    $d = $DepIndex[$Id]
+    $r = $null
+    if ($d -and $d.Download -and $d.Download.Installer) { $r = Install-WPLocal $d.Download (Join-Path $BackupRoot ("Installers\_Dependencies\" + $d.Download.Folder)) }
+    if ((-not $r -or -not $r.Ok) -and $script:WP.Winget) { $r = Install-WPOnline $Id 'winget' }
+    if ($r -and -not $r.Ok) { Write-WPLog "  dependency $Id failed: $($r.Detail)" 'warn' }
 }
 
 function Install-WPOnline {
@@ -1827,14 +1873,7 @@ function Install-WPEntry {
         foreach ($dep in @($dl.Dependencies)) {
             if (-not $dep -or $DoneDeps[$dep]) { continue }
             $DoneDeps[$dep] = $true
-            if ($Installed -and $Installed.Ids[$dep.ToLowerInvariant()]) { continue }
-            $d = $DepIndex[$dep]
-            if ($Options.TestRun) { Write-WPLog "  would install dependency $dep first" 'info'; continue }
-            Write-WPLog "  installing dependency $dep" 'info'
-            $r = $null
-            if ($d -and $d.Download -and $d.Download.Installer) { $r = Install-WPLocal $d.Download (Join-Path $BackupRoot ("Installers\_Dependencies\" + $d.Download.Folder)) }
-            if ((-not $r -or -not $r.Ok) -and $script:WP.Winget) { $r = Install-WPOnline $dep 'winget' }
-            if ($r -and -not $r.Ok) { Write-WPLog "  dependency $dep failed: $($r.Detail)" 'warn' }
+            Install-WPDependency $dep $BackupRoot $DepIndex $Installed -TestRun:$Options.TestRun
         }
     }
     $interactive = -not $Options.Silent
@@ -1862,6 +1901,72 @@ function Install-WPEntry {
         'game' { return @{ Ok = $false; Manual = $true; Detail = "Reinstall from $($Entry.Via)." } }
         default { return @{ Ok = $false; Manual = $true; Detail = 'Manual download (Manual links button).' } }
     }
+}
+
+function Get-WPRestoreProgressPath {
+    return (Join-Path $script:WP.StateDir 'restore-progress.json')
+}
+
+function Save-WPRestoreProgress {
+    param($Progress)
+    $Progress.updated = (Get-Date).ToString('s')
+    try { Write-WPJson $Progress (Get-WPRestoreProgressPath) } catch { }
+}
+
+function Get-WPRestoreProgress {
+    # An unfinished restore from the last week, if there is one.
+    $p = $null
+    try { $p = Read-WPJson (Get-WPRestoreProgressPath) } catch { }
+    if (-not $p -or $p.complete -or -not $p.backup) { return $null }
+    try { if (((Get-Date) - [datetime]$p.updated).TotalDays -gt 7) { return $null } } catch { }
+    return $p
+}
+
+function Clear-WPRestoreProgress {
+    $path = Get-WPRestoreProgressPath
+    if ([IO.File]::Exists($path)) { [IO.File]::Delete($path) }
+}
+
+function Find-WPBackups {
+    # Looks for WinPrestige backups next to the app, in recent places, on other drives (including USB),
+    # on mapped network shares and in Desktop, Documents and Downloads. Checks one folder level deep.
+    param([string[]]$Extra)
+    $roots = New-Object System.Collections.Generic.List[string]
+    foreach ($x in @($Extra)) { if ($x) { $roots.Add([string]$x) } }
+    foreach ($d in @(Get-CimInstance Win32_LogicalDisk -ErrorAction SilentlyContinue)) {
+        if ($d.DeviceID -eq $env:SystemDrive) { continue }
+        if (@(2, 3) -contains [int]$d.DriveType) { $roots.Add($d.DeviceID + '\') }
+    }
+    foreach ($k in (Get-ChildItem -Path 'HKCU:\Network' -ErrorAction SilentlyContinue)) {
+        $unc = (Get-ItemProperty -LiteralPath $k.PSPath -ErrorAction SilentlyContinue).RemotePath
+        if ($unc) { $roots.Add([string]$unc) }
+    }
+    foreach ($kf in @('Desktop', 'MyDocuments')) { $roots.Add([Environment]::GetFolderPath($kf)) }
+    $roots.Add((Get-WPDownloadsFolder))
+    $seen = @{}
+    $found = @()
+    foreach ($r in $roots) {
+        if (-not $r) { continue }
+        $candidates = @($r, (Join-Path $r 'WinPrestige Backup'))
+        try {
+            $candidates += @(Get-ChildItem -LiteralPath $r -Directory -ErrorAction Stop | Select-Object -First 300 | ForEach-Object { $_.FullName; (Join-Path $_.FullName 'WinPrestige Backup') })
+        } catch { }
+        foreach ($c in $candidates) {
+            $key = $c.TrimEnd('\').ToLowerInvariant()
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+            $mf = Join-Path $c 'manifest.json'
+            if (-not (Test-Path -LiteralPath $mf -PathType Leaf)) { continue }
+            $m = $null
+            try { $m = Read-WPJson $mf } catch { continue }
+            if (-not $m -or @('WinPrestige', 'ResetKit') -notcontains [string]$m.tool) { continue }
+            $found += [pscustomobject]@{
+                Path = $c.TrimEnd('\'); Computer = [string]$m.computer; Created = [string]$m.created
+                Apps = @($m.apps | Where-Object { $_.Selected }).Count; Configs = @($m.configs).Count
+            }
+        }
+    }
+    return @($found | Sort-Object Created -Descending)
 }
 
 function Restore-WPExtra {
@@ -1947,7 +2052,30 @@ function Invoke-WPRestore {
     param([string]$BackupRoot, $Entries, $Configs, $Extras, $Dependencies, [hashtable]$Options)
     $root = $BackupRoot.TrimEnd('\')
     $test = [bool]$Options.TestRun
+    $maxParallel = 1
+    if ($Options.Parallel -and $Options.Silent -and -not $test) { $maxParallel = 3 }
     if ($test) { Write-WPLog 'Test run: nothing will be installed or changed.' 'step' }
+
+    # Progress is saved after every app so a restart mid-restore can pick up where it left off.
+    $progress = $null
+    if (-not $test) {
+        $done = @{}
+        $selected = [ordered]@{
+            apps = @($Entries | ForEach-Object { [string]$_.Key })
+            configs = @($Configs | ForEach-Object { [string]$_.Id })
+            extras = @($Extras | ForEach-Object { [string]$_.Id })
+        }
+        $started = (Get-Date).ToString('s')
+        if ($Options.Progress) {
+            $done = ConvertTo-WPHashtable $Options.Progress.done
+            $selected = $Options.Progress.selected
+            $started = [string]$Options.Progress.started
+        }
+        $total = @($selected.apps).Count + @($selected.configs).Count + @($selected.extras).Count
+        $progress = [ordered]@{ backup = $root; computer = [string]$Options.Computer; started = $started; updated = ''; complete = $false; total = $total; selected = $selected; done = $done }
+        Save-WPRestoreProgress $progress
+    }
+
     $installed = $null
     if ($Options.SkipInstalled) {
         Write-WPLog 'Checking what is already installed...' 'step'
@@ -1958,24 +2086,107 @@ function Invoke-WPRestore {
     $doneDeps = @{}
     $order = @{ runtimes = 0; drivers = 1; launchers = 2; apps = 3; store = 4; bundled = 5; games = 6; system = 7 }
     $list = @($Entries | Sort-Object { $order[[string]$_.Category] }, Name)
-    $ok = 0; $failed = 0; $manual = 0; $skipped = 0; $i = 0
-    Write-WPLog ("Installing {0} apps..." -f $list.Count) 'step'
-    foreach ($e in $list) {
-        if (Test-WPCancel) { Write-WPLog 'Restore cancelled.' 'warn'; break }
-        $i++
-        Set-WPProgress $i $list.Count ("Installing {0}" -f $e.Name)
-        if ($Options.SkipInstalled -and (Test-WPInstalled $e $installed)) {
-            $skipped++
-            Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Already installed'; Level = 'info' }
-            Write-WPLog ("{0}: already installed" -f $e.Name) 'info'
-            continue
-        }
-        Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Installing...'; Level = 'step' }
-        try { $r = Install-WPEntry $e $root $Options $depIndex $doneDeps $installed }
-        catch { $r = @{ Ok = $false; Detail = $_.Exception.Message } }
-        if ($r.Ok) { $ok++; $lvl = 'ok' } elseif ($r.Manual) { $manual++; $lvl = 'warn' } else { $failed++; $lvl = 'error' }
+    $stats = @{ ok = 0; failed = 0; manual = 0; skipped = 0; finished = 0; total = $list.Count; restart = $false }
+
+    $finish = {
+        param($e, $r)
+        $stats.finished++
+        if ($r.Skipped) { $stats.skipped++; $lvl = 'info'; $mk = 'skipped' }
+        elseif ($r.Ok) { $stats.ok++; $lvl = 'ok'; $mk = 'ok' }
+        elseif ($r.Manual) { $stats.manual++; $lvl = 'warn'; $mk = 'manual' }
+        else { $stats.failed++; $lvl = 'error'; $mk = 'failed' }
+        if ([string]$r.Detail -like '*restart needed*') { $stats.restart = $true }
         Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = $r.Detail; Level = $lvl }
         Write-WPLog ("{0}: {1}" -f $e.Name, $r.Detail) $lvl
+        Set-WPProgress $stats.finished $stats.total ("Installed {0} of {1}" -f $stats.finished, $stats.total)
+        if ($progress) { $progress.done[[string]$e.Key] = $mk; Save-WPRestoreProgress $progress }
+    }
+
+    # Sort everything into lanes; skip what's already installed and what needs a manual download.
+    $lanes = @{ parallel = New-Object System.Collections.Generic.List[object]; one = New-Object System.Collections.Generic.List[object]; msi = New-Object System.Collections.Generic.List[object] }
+    foreach ($e in $list) {
+        if (Test-WPCancel) { break }
+        if ($Options.SkipInstalled -and (Test-WPInstalled $e $installed)) { & $finish $e @{ Skipped = $true; Detail = 'Already installed' }; continue }
+        $lane = Get-WPInstallLane $e $Options
+        if ($lane -eq 'manual') { & $finish $e (Install-WPEntry $e $root $Options $depIndex $doneDeps $installed); continue }
+        if ($test) {
+            $r = Install-WPEntry $e $root $Options $depIndex $doneDeps $installed
+            $note = @{ parallel = 'alongside others'; one = 'on its own'; msi = 'on its own, at the end (MSI)' }[$lane]
+            $r.Detail = "$($r.Detail) ($note)"
+            & $finish $e $r
+            continue
+        }
+        $lanes[$lane].Add($e)
+    }
+
+    if (-not $test -and -not (Test-WPCancel)) {
+        # 1. Shared dependencies (e.g. .NET runtimes) before anything that needs them.
+        $deps = @()
+        foreach ($lane in @('parallel', 'one', 'msi')) {
+            foreach ($e in $lanes[$lane]) { if ($e.Download -and $e.Download.Dependencies) { $deps += @($e.Download.Dependencies) } }
+        }
+        $deps = @($deps | Where-Object { $_ } | Select-Object -Unique)
+        if ($deps.Count) {
+            Write-WPLog ("Installing {0} shared dependencies first..." -f $deps.Count) 'step'
+            foreach ($dep in $deps) {
+                if (Test-WPCancel) { break }
+                $doneDeps[$dep] = $true
+                Install-WPDependency $dep $root $depIndex $installed
+            }
+        }
+
+        # 2. Silent non-MSI installers, a few at a time. Failures get one more go on their own later.
+        if ($lanes.parallel.Count -and -not (Test-WPCancel)) {
+            Write-WPLog ("Installing {0} apps, up to {1} at a time..." -f $lanes.parallel.Count, $maxParallel) 'step'
+            $queue = New-Object System.Collections.Queue
+            foreach ($e in $lanes.parallel) { $queue.Enqueue($e) }
+            $running = New-Object System.Collections.Generic.List[object]
+            $retry = New-Object System.Collections.Generic.List[object]
+            while ($queue.Count -gt 0 -or $running.Count -gt 0) {
+                if (Test-WPCancel) {
+                    foreach ($r in $running) { try { $r.Handle.Process.Kill() } catch { } }
+                    break
+                }
+                while ($running.Count -lt $maxParallel -and $queue.Count -gt 0) {
+                    $e = $queue.Dequeue()
+                    Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Installing...'; Level = 'step' }
+                    $h = Start-WPLocalInstall $e.Download (Join-Path $root ("Installers\" + $e.Download.Folder))
+                    if ($h.Done) {
+                        if ($h.Ok) { & $finish $e @{ Ok = $true; Detail = $h.Detail } } else { $retry.Add($e) }
+                        continue
+                    }
+                    $running.Add(@{ Entry = $e; Handle = $h })
+                }
+                Start-Sleep -Milliseconds 400
+                foreach ($r in $running.ToArray()) {
+                    if ($r.Handle.Process.HasExited) {
+                        [void]$running.Remove($r)
+                        $res = Complete-WPLocalInstall $r.Handle
+                        if ($res.Ok) { & $finish $r.Entry $res } else { $retry.Add($r.Entry) }
+                    } elseif (((Get-Date) - $r.Handle.Started).TotalMinutes -gt 60) {
+                        [void]$running.Remove($r)
+                        & $finish $r.Entry @{ Ok = $false; Detail = 'Installer is still running after an hour; moving on.' }
+                    }
+                }
+            }
+            foreach ($e in $retry) {
+                Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Will retry on its own'; Level = 'info' }
+                $lanes.one.Insert(0, $e)
+            }
+        }
+
+        # 3. Installers that need a window, winget and Store installs, and retries, one at a time.
+        # 4. MSI-based installers last, one at a time.
+        foreach ($lane in @('one', 'msi')) {
+            if ($lane -eq 'msi' -and $lanes.msi.Count -and -not (Test-WPCancel)) { Write-WPLog ("Installing {0} MSI-based installers one at a time..." -f $lanes.msi.Count) 'step' }
+            foreach ($e in $lanes[$lane]) {
+                if (Test-WPCancel) { break }
+                Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Installing...'; Level = 'step' }
+                $r = $null
+                try { $r = Install-WPEntry $e $root $Options $depIndex $doneDeps $installed } catch { $r = @{ Ok = $false; Detail = $_.Exception.Message } }
+                & $finish $e $r
+            }
+        }
     }
 
     if (-not (Test-WPCancel) -and @($Configs).Count) {
@@ -1983,20 +2194,24 @@ function Invoke-WPRestore {
         foreach ($c in @($Configs)) {
             if (Test-WPCancel) { break }
             $script = Join-Path $root ("Configs\" + $c.Folder + "\Restore-Config.ps1")
+            $key = 'config:' + $c.Id
             if (-not (Test-Path -LiteralPath $script)) {
-                Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = 'Missing from backup'; Level = 'error' }
+                Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Missing from backup'; Level = 'error' }
+                if ($progress) { $progress.done[$key] = 'failed'; Save-WPRestoreProgress $progress }
                 continue
             }
-            Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = 'Restoring...'; Level = 'step' }
+            Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Restoring...'; Level = 'step' }
             try {
                 $out = & $script -TestRun:$test *>&1 | ForEach-Object { "$_" }
                 $last = @($out | Where-Object { $_.Trim() }) | Select-Object -Last 1
-                Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = $(if ($last) { $last.Trim() } else { 'Restored' }); Level = 'ok' }
+                Send-WPMessage 'restoreItem' @{ Key = $key; Status = $(if ($last) { $last.Trim() } else { 'Restored' }); Level = 'ok' }
                 foreach ($line in $out) { if ($line.Trim()) { Write-WPLog ("  " + $line.Trim()) 'info' } }
                 Write-WPLog ("{0} settings restored" -f $c.Name) 'ok'
+                if ($progress) { $progress.done[$key] = 'ok'; Save-WPRestoreProgress $progress }
             } catch {
-                Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = $_.Exception.Message; Level = 'error' }
+                Send-WPMessage 'restoreItem' @{ Key = $key; Status = $_.Exception.Message; Level = 'error' }
                 Write-WPLog ("{0} settings: {1}" -f $c.Name, $_.Exception.Message) 'error'
+                if ($progress) { $progress.done[$key] = 'failed'; Save-WPRestoreProgress $progress }
             }
         }
     }
@@ -2005,15 +2220,20 @@ function Invoke-WPRestore {
         Write-WPLog 'Restoring extras...' 'step'
         foreach ($x in @($Extras)) {
             if (Test-WPCancel) { break }
-            Send-WPMessage 'restoreItem' @{ Key = 'extra:' + $x.Id; Status = 'Restoring...'; Level = 'step' }
+            $key = 'extra:' + $x.Id
+            Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Restoring...'; Level = 'step' }
             try { $r = Restore-WPExtra $x $root -TestRun:$test } catch { $r = @{ Ok = $false; Detail = $_.Exception.Message } }
-            Send-WPMessage 'restoreItem' @{ Key = 'extra:' + $x.Id; Status = $r.Detail; Level = $(if ($r.Ok) { 'ok' } else { 'error' }) }
+            Send-WPMessage 'restoreItem' @{ Key = $key; Status = $r.Detail; Level = $(if ($r.Ok) { 'ok' } else { 'error' }) }
             Write-WPLog ("{0}: {1}" -f $x.Name, $r.Detail) $(if ($r.Ok) { 'ok' } else { 'error' })
+            if ($progress) { $progress.done[$key] = $(if ($r.Ok) { 'ok' } else { 'failed' }); Save-WPRestoreProgress $progress }
         }
     }
-    Write-WPLog ("Done: {0} installed, {1} already there, {2} manual, {3} failed." -f $ok, $skipped, $manual, $failed) 'ok'
-    if ($failed -or $manual) { Write-WPLog 'Use "Manual links" for the rest, then restart the PC.' 'info' }
-    return @{ Ok = $ok; Failed = $failed; Manual = $manual; Skipped = $skipped }
+
+    $cancelled = Test-WPCancel
+    if ($progress -and -not $cancelled) { Clear-WPRestoreProgress }
+    Write-WPLog ("Done: {0} installed, {1} already there, {2} manual, {3} failed." -f $stats.ok, $stats.skipped, $stats.manual, $stats.failed) 'ok'
+    if ($stats.failed -or $stats.manual) { Write-WPLog 'Use "Manual links" for the rest, then restart the PC.' 'info' }
+    return @{ Ok = $stats.ok; Failed = $stats.failed; Manual = $stats.manual; Skipped = $stats.skipped; Complete = (-not $cancelled); RestartNeeded = $stats.restart }
 }
 
 #endregion

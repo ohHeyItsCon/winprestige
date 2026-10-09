@@ -276,11 +276,18 @@ function New-WPDemoEntry {
 function New-WPDemoDownload {
     param($App, [string]$Status = 'Downloaded', [long]$Bytes = 52428800)
     $clean = Get-WPSafeName (Get-WPCleanName $App.Name)
+    # Runtimes are MSI-based (burn) bundles in real life, so they land in the install-last lane.
+    $type = 'exe'
+    if ($App.Category -eq 'runtimes') { $type = 'burn' }
     return @{
         Status = $Status; Folder = $clean; WingetId = $App.WingetId; Version = $App.Latest
-        Installer = ('{0}_{1}_X64_exe_en-US.exe' -f ($clean -replace ' ', '_'), $App.Latest); Bytes = $Bytes
-        Type = 'exe'; Silent = '/S'; Dependencies = @(); Codes = @{}; Date = (Get-Date).ToString('yyyy-MM-dd')
+        Installer = ('{0}_{1}_X64_{2}_en-US.exe' -f ($clean -replace ' ', '_'), $App.Latest, $type); Bytes = $Bytes
+        Type = $type; Silent = '/S'; Dependencies = @(); Codes = @{}; Date = (Get-Date).ToString('yyyy-MM-dd')
     }
+}
+
+function Find-WPDemoBackups {
+    return @([pscustomobject]@{ Path = '\\NAS\Backups\WinPrestige Backup'; Computer = 'ALEX-PC'; Created = (Get-Date).AddDays(-1).ToString('s'); Apps = 65; Configs = 18 })
 }
 
 function Invoke-WPDemoBackup {
@@ -407,36 +414,70 @@ function Invoke-WPDemoRestore {
     param([string]$BackupRoot, $Entries, $Configs, $Extras, $Dependencies, [hashtable]$Options)
     $rand = New-Object Random 5
     $test = [bool]$Options.TestRun
+    $maxParallel = 1
+    if ($Options.Parallel -and $Options.Silent -and -not $test) { $maxParallel = 3 }
     if ($test) { Write-WPLog 'Test run: nothing will be installed or changed.' 'step' }
     Write-WPLog 'Checking what is already installed...' 'step'
     Start-Sleep -Milliseconds 900
     $order = @{ runtimes = 0; drivers = 1; launchers = 2; apps = 3; store = 4; bundled = 5 }
     $list = @($Entries | Sort-Object { $order[[string]$_.Category] }, Name)
-    $ok = 0; $manual = 0; $skipped = 0; $i = 0
-    Write-WPLog ("Installing {0} apps..." -f $list.Count) 'step'
+    $stats = @{ ok = 0; manual = 0; skipped = 0; finished = 0; total = $list.Count }
+    $finish = {
+        param($e, [string]$Detail, [string]$Level)
+        $stats.finished++
+        if ($Level -eq 'ok') { $stats.ok++ } elseif ($Level -eq 'warn') { $stats.manual++ } else { $stats.skipped++ }
+        Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = $Detail; Level = $Level }
+        Write-WPLog ("{0}: {1}" -f $e.Name, $Detail) $Level
+        Set-WPProgress $stats.finished $stats.total ("Installed {0} of {1}" -f $stats.finished, $stats.total)
+    }
+    $lanes = @{ parallel = New-Object System.Collections.Generic.List[object]; one = New-Object System.Collections.Generic.List[object]; msi = New-Object System.Collections.Generic.List[object] }
     foreach ($e in $list) {
-        if (Test-WPCancel) { Write-WPLog 'Restore cancelled.' 'warn'; break }
-        $i++
-        Set-WPProgress $i $list.Count ("Installing {0}" -f (Get-WPCleanName $e.Name))
-        if ($e.Name -eq 'Windows Terminal' -and $Options.SkipInstalled) {
-            $skipped++
-            Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Already installed'; Level = 'info' }
-            Write-WPLog ("{0}: already installed" -f $e.Name) 'info'
+        if ($e.Name -eq 'Windows Terminal' -and $Options.SkipInstalled) { & $finish $e 'Already installed' 'info'; continue }
+        $lane = Get-WPInstallLane $e $Options
+        if ($lane -eq 'manual') {
+            $msg = 'Manual download (Manual links button).'
+            if ($e.Method -eq 'storelink') { $msg = 'Open it in the Microsoft Store (Manual links button).' }
+            & $finish $e $msg 'warn'
             continue
         }
-        Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Installing...'; Level = 'step' }
-        Start-Sleep -Milliseconds (140 + $rand.Next(320))
-        $detail = $null; $lvl = 'ok'
-        switch ($e.Method) {
-            'local' { $detail = $(if ($test) { "Would run $($e.Download.Installer)" } elseif ($e.Name -like 'Visual Studio*') { 'Installed (restart needed)' } else { 'Installed' }) }
-            'winget' { $detail = $(if ($test) { "Would install $($e.WingetId) from winget" } else { 'Installed with winget (winget)' }) }
-            'store' { $detail = $(if ($test) { "Would install $($e.WingetId) from msstore" } else { 'Installed with winget (msstore)' }) }
-            'storelink' { $detail = 'Open it in the Microsoft Store (Manual links button).'; $lvl = 'warn' }
-            default { $detail = 'Manual download (Manual links button).'; $lvl = 'warn' }
+        $lanes[$lane].Add($e)
+    }
+    if ($lanes.parallel.Count -and -not (Test-WPCancel)) {
+        Write-WPLog ("Installing {0} apps, up to {1} at a time..." -f $lanes.parallel.Count, $maxParallel) 'step'
+        $queue = New-Object System.Collections.Queue
+        foreach ($e in $lanes.parallel) { $queue.Enqueue($e) }
+        $running = New-Object System.Collections.Generic.List[object]
+        while ($queue.Count -gt 0 -or $running.Count -gt 0) {
+            if (Test-WPCancel) { break }
+            while ($running.Count -lt $maxParallel -and $queue.Count -gt 0) {
+                $e = $queue.Dequeue()
+                Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Installing...'; Level = 'step' }
+                $running.Add(@{ Entry = $e; Ends = (Get-Date).AddMilliseconds(500 + $rand.Next(1300)) })
+            }
+            Start-Sleep -Milliseconds 120
+            foreach ($r in $running.ToArray()) {
+                if ((Get-Date) -ge $r.Ends) {
+                    [void]$running.Remove($r)
+                    $detail = $(if ($test) { "Would run $($r.Entry.Download.Installer)" } else { 'Installed' })
+                    & $finish $r.Entry $detail 'ok'
+                }
+            }
         }
-        if ($lvl -eq 'ok') { $ok++ } else { $manual++ }
-        Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = $detail; Level = $lvl }
-        Write-WPLog ("{0}: {1}" -f $e.Name, $detail) $lvl
+    }
+    foreach ($lane in @('one', 'msi')) {
+        if ($lane -eq 'msi' -and $lanes.msi.Count -and -not (Test-WPCancel)) { Write-WPLog ("Installing {0} MSI-based installers one at a time..." -f $lanes.msi.Count) 'step' }
+        foreach ($e in $lanes[$lane]) {
+            if (Test-WPCancel) { break }
+            Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = 'Installing...'; Level = 'step' }
+            Start-Sleep -Milliseconds (300 + $rand.Next(500))
+            $detail = switch ($e.Method) {
+                'winget' { 'Installed with winget (winget)' }
+                'store' { 'Installed with winget (msstore)' }
+                default { $(if ($e.Name -like 'Visual Studio*') { 'Installed (restart needed)' } else { 'Installed' }) }
+            }
+            if ($test) { $detail = "Would install $($e.Name)" }
+            & $finish $e $detail 'ok'
+        }
     }
     if (-not (Test-WPCancel) -and @($Configs).Count) {
         Write-WPLog 'Putting app settings back...' 'step'
@@ -458,7 +499,7 @@ function Invoke-WPDemoRestore {
             Write-WPLog ("{0}: {1}" -f $x.Name, $msg) 'ok'
         }
     }
-    Write-WPLog ("Done: {0} installed, {1} already there, {2} manual, 0 failed." -f $ok, $skipped, $manual) 'ok'
-    if ($manual) { Write-WPLog 'Use "Manual links" for the rest, then restart the PC.' 'info' }
-    return @{ Ok = $ok; Failed = 0; Manual = $manual; Skipped = $skipped }
+    Write-WPLog ("Done: {0} installed, {1} already there, {2} manual, 0 failed." -f $stats.ok, $stats.skipped, $stats.manual) 'ok'
+    if ($stats.manual) { Write-WPLog 'Use "Manual links" for the rest, then restart the PC.' 'info' }
+    return @{ Ok = $stats.ok; Failed = 0; Manual = $stats.manual; Skipped = $stats.skipped; Complete = (-not (Test-WPCancel)); RestartNeeded = $true }
 }

@@ -20,7 +20,8 @@ Reinstalling Windows is easy. Rebuilding your setup afterwards isn't: rememberin
 - **Saves the latest official installers** to a folder or NAS share, using [winget](https://learn.microsoft.com/windows/package-manager/). winget records each vendor's own download link and checks the file against a SHA-256 hash.
 - **Backs up app settings** for about 50 apps, including OBS (scenes, profiles and the media your scenes use), FanControl, Elgato Stream Deck and Wave Link, Corsair iCUE, Logitech G HUB, SteelSeries GG, NZXT CAM, SignalRGB, BakkesMod, Wallpaper Engine, Minecraft worlds, Adobe presets and Windows Terminal. You can add any other folder too.
 - **Extras:** fonts you installed, environment variables, and optionally Wi-Fi networks, drivers and your user folders.
-- **Restores everything** silently. If a saved installer fails, winget installs the app online instead. Your settings go back in place, even if your Windows user name changes.
+- **Restores everything** in one batch, silently. Simple installers run three at a time and MSI-based ones run one by one at the end. If a saved installer fails, winget installs the app online instead. Your settings go back in place, even if your Windows user name changes.
+- **Finds your backup** on a fresh copy of WinPrestige, and **picks up where it left off** if the PC restarts mid-restore.
 - **Stays up to date.** Run it again before the reset and it downloads only newer installers, adds new apps, and removes ones you've uninstalled.
 - **Writes a report** (`AppInventory.html`) listing every app, how it comes back, and its official download link.
 
@@ -55,9 +56,22 @@ Requirements: Windows 10 or 11. winget (App Installer) is used when available; w
 
 ## After the reset
 
-1. Open your backup folder, from your NAS or external drive.
-2. Double-click `Restore.cmd`. WinPrestige opens on the Restore tab with the backup loaded.
-3. Press **Start restore**. Afterwards, use **Open manual links** for anything that needs a manual download, and restart the PC.
+Either way works:
+
+- **Freshly downloaded WinPrestige:** it looks for backups on your other drives, USB drives, mapped network shares, and Desktop, Documents and Downloads. If it finds one, press **Restore everything**, or **Review first** to choose what to reinstall. If not, press **Find my backup...** and pick the folder.
+- **From the backup itself:** open the backup folder on your NAS or external drive and double-click `Restore.cmd`.
+
+The restore runs in one batch:
+
+1. Shared runtimes the installers need, such as .NET.
+2. Simple silent installers, three at a time (turn off **Install several at once** to go one by one).
+3. Winget and Microsoft Store installs, and any installer that needs clicking through.
+4. MSI-based installers, one at a time, at the end.
+5. Your app settings and extras.
+
+If an installer clashes with another one running at the same time, it gets retried on its own. Afterwards, use **Open manual links** for anything that needs a manual download, and restart the PC.
+
+If the PC restarts in the middle, WinPrestige opens again after you sign in and offers to **Continue restore** with whatever's left.
 
 If the admin window can't reach a network share, WinPrestige offers to sign in to it for you.
 
