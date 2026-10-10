@@ -40,7 +40,8 @@ param(
     [ValidateSet('Apps', 'Configs', 'Extras', 'Backup', 'Restore')][string]$ScreenshotTab = 'Apps',
     [int]$ScreenshotWait = 180,
     [ValidateSet('', 'Backup', 'Restore', 'Banner', 'Review', 'Drop')][string]$ScreenshotAction = '',
-    [string]$ScreenshotSelect
+    [string]$ScreenshotSelect,
+    [double]$ScreenshotScale = 1
 )
 
 $ErrorActionPreference = 'Stop'
@@ -331,8 +332,21 @@ function Move-WPModeThumb {
 }
 
 function New-WPAvatar {
-    # A small monogram tile in a colour picked from the name, so every app gets a recognisable mark.
-    param([string]$Name, [double]$Size = 24)
+    # The app's real icon when the scan found one; otherwise a monogram tile in a colour picked from the name.
+    param([string]$Name, [double]$Size = 24, [string]$Icon)
+    if ($Icon -and (Test-Path -LiteralPath $Icon)) {
+        try {
+            $bi = New-Object Windows.Media.Imaging.BitmapImage
+            $bi.BeginInit(); $bi.UriSource = [Uri]$Icon; $bi.CacheOption = 'OnLoad'; $bi.DecodePixelWidth = [int]([Math]::Min(128, $Size * 3)); $bi.EndInit()
+            $img = New-Object Windows.Controls.Image
+            $img.Source = $bi; $img.Width = $Size; $img.Height = $Size; $img.Stretch = 'Uniform'
+            [Windows.Media.RenderOptions]::SetBitmapScalingMode($img, 'HighQuality')
+            $holder = New-Object Windows.Controls.Border
+            $holder.Width = $Size; $holder.Height = $Size; $holder.VerticalAlignment = 'Center'
+            $holder.Child = $img
+            return $holder
+        } catch { }
+    }
     $clean = Get-WPCleanName $Name
     if (-not $clean) { $clean = $Name }
     $words = @($clean -split '[^A-Za-z0-9]+' | Where-Object { $_ })
@@ -729,7 +743,7 @@ function New-WPAppRow {
     $cb.Style = $window.FindResource('Chk')
     $cb.Tag = $App.Key
     $cb.Add_Click({ Set-WPAppSelected $this.Tag ([bool]$this.IsChecked) })
-    $avatar = New-WPAvatar $App.Name 24
+    $avatar = New-WPAvatar $App.Name 24 ([string]$App.Icon)
     $avatar.Margin = '1,0,0,0'
     $name = New-WPText $App.Name 13 $Palette.Text -Margin '10,0,4,0'
     $name.VerticalAlignment = 'Center'
@@ -950,7 +964,7 @@ function Show-WPDetails {
     if ($state.Rows[$Key]) { $state.Rows[$Key].Root.Background = Get-WPBrush $Palette.Accent 40 }
 
     $head = New-Object Windows.Controls.DockPanel
-    $big = New-WPAvatar $app.Name 44
+    $big = New-WPAvatar $app.Name 44 ([string]$app.Icon)
     $big.Margin = '0,0,12,0'
     [Windows.Controls.DockPanel]::SetDock($big, 'Left')
     [void]$head.Children.Add($big)
@@ -1159,6 +1173,7 @@ function Start-WPScan {
             $apps = Get-WPDemoApps; $configs = Get-WPDemoConfigs; $extras = Get-WPDemoExtras
         } else {
             $apps = Get-WPInventory
+            Update-WPAppIcons $apps
             $configs = Get-WPConfigCandidates $apps $P.CustomConfigs
             $extras = Get-WPExtras
         }
@@ -1247,7 +1262,7 @@ function New-WPConfigCard {
     $cb.Tag = $Cfg.Id
     $label = New-Object Windows.Controls.StackPanel
     $label.Orientation = 'Horizontal'
-    [void]$label.Children.Add((New-WPAvatar $Cfg.Name 26))
+    [void]$label.Children.Add((New-WPAvatar $Cfg.Name 26 (Find-WPConfigIcon $Cfg $state.Apps)))
     $cfgName = New-WPText $Cfg.Name 14 $Palette.Text 'SemiBold' -Margin '10,0,0,0'
     $cfgName.VerticalAlignment = 'Center'
     [void]$label.Children.Add($cfgName)
@@ -1769,7 +1784,7 @@ function Get-WPRestoreBadge {
 }
 
 function New-WPRestoreRow {
-    param([string]$Key, [string]$Name, [string]$Group, $Badge, [string]$Tip, [bool]$Checked, [bool]$Enabled = $true)
+    param([string]$Key, [string]$Name, [string]$Group, $Badge, [string]$Tip, [bool]$Checked, [bool]$Enabled = $true, [string]$Icon)
     $row = New-Object Windows.Controls.Border
     $row.Style = $window.FindResource('Row')
     $row.Height = [double]::NaN
@@ -1788,7 +1803,7 @@ function New-WPRestoreRow {
     $cb.VerticalAlignment = 'Top'
     $cb.Margin = '0,2,0,0'
     $cb.Add_Click({ $state.RestoreSel[$this.Tag] = [bool]$this.IsChecked; Update-WPRestoreSummary })
-    $avatar = New-WPAvatar $Name 22
+    $avatar = New-WPAvatar $Name 22 $Icon
     $avatar.Margin = '9,0,0,0'
     $avatar.VerticalAlignment = 'Top'
     $sp = New-Object Windows.Controls.StackPanel
@@ -1840,6 +1855,16 @@ function Update-WPRestoreStatus {
     }
 }
 
+function Resolve-WPEntryIcon {
+    # Icons saved in a backup are relative to it ("Icons\x.png"); demo mode uses this PC's icon cache.
+    param($Entry)
+    if (-not $Entry -or -not $Entry.PSObject.Properties['Icon'] -or -not $Entry.Icon) { return '' }
+    $p = [string]$Entry.Icon
+    if (-not [IO.Path]::IsPathRooted($p)) { $p = Join-Path $state.RestoreRoot $p }
+    if (Test-Path -LiteralPath $p) { return $p }
+    return ''
+}
+
 function Import-WPBackup {
     param([string]$Path)
     $path = $Path.Trim().Trim('"')
@@ -1872,18 +1897,18 @@ function Import-WPBackup {
         if ($e.Category -eq 'system') { continue }
         if ($e.Category -eq 'games') {
             if (-not $e.GameUri) { continue }
-            New-WPRestoreRow $e.Key $e.Name 'games' (Get-WPRestoreBadge ([pscustomobject]@{ Method = 'game'; Via = $e.Via })) 'Tick, then use "Queue ticked games in Steam" once Steam is installed and signed in.' $false
+            New-WPRestoreRow $e.Key $e.Name 'games' (Get-WPRestoreBadge ([pscustomobject]@{ Method = 'game'; Via = $e.Via })) 'Tick, then use "Queue ticked games in Steam" once Steam is installed and signed in.' $false $true (Resolve-WPEntryIcon $e)
             continue
         }
         if (-not $e.Selected) { continue }
         $tip = $e.Name
         if ($e.Download -and $e.Download.Installer) { $tip += "`nInstaller: $($e.Download.Installer)" }
         if ($e.WingetId) { $tip += "`nwinget: $($e.WingetId)" }
-        New-WPRestoreRow $e.Key $e.Name ([string]$e.Category) (Get-WPRestoreBadge $e) $tip $true
+        New-WPRestoreRow $e.Key $e.Name ([string]$e.Category) (Get-WPRestoreBadge $e) $tip $true $true (Resolve-WPEntryIcon $e)
     }
     foreach ($c in @($m.configs)) {
         $ok = @('Saved', 'Partial') -contains $c.Status
-        New-WPRestoreRow ('config:' + $c.Id) $c.Name 'configs' @{ Text = 'settings'; Color = $Palette.Accent } ([string]$c.Notes) $ok $ok
+        New-WPRestoreRow ('config:' + $c.Id) $c.Name 'configs' @{ Text = 'settings'; Color = $Palette.Accent } ([string]$c.Notes) $ok $ok (Resolve-WPEntryIcon $c)
     }
     foreach ($x in @($m.extras)) {
         $ok = @('Saved', 'Partial') -contains $x.Status
@@ -2633,7 +2658,7 @@ if ($Screenshot) {
             $shotTimer.Stop()
             $window.UpdateLayout()
             $w = [int]$window.ActualWidth; $h = [int]$window.ActualHeight
-            $rtb = New-Object Windows.Media.Imaging.RenderTargetBitmap $w, $h, 96, 96, ([Windows.Media.PixelFormats]::Pbgra32)
+            $k = [Math]::Max(1, $ScreenshotScale); $rtb = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int]($w * $k)), ([int]($h * $k)), (96 * $k), (96 * $k), ([Windows.Media.PixelFormats]::Pbgra32)
             $rtb.Render($window)
             $enc = New-Object Windows.Media.Imaging.PngBitmapEncoder
             $enc.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($rtb))

@@ -397,7 +397,7 @@ function New-WPApp {
     return [pscustomobject]@{
         Key = ''; Name = ''; Version = ''; Latest = ''; Publisher = ''
         WingetId = ''; Source = ''; Kind = ''; ArpId = ''; Pfn = ''; RegKey = ''
-        InstallLocation = ''; UninstallString = ''; Url = ''
+        InstallLocation = ''; UninstallString = ''; Url = ''; DisplayIcon = ''; Icon = ''
         Category = ''; Via = ''; GameUri = ''; LauncherGame = $false
         Selected = $false; Match = ''; Candidates = @(); CustomUrl = ''
         Status = ''; Detail = ''
@@ -528,7 +528,7 @@ function Get-WPInventory {
             }
             if ($r) {
                 $app.Publisher = $r.Publisher; $app.InstallLocation = $r.InstallLocation
-                $app.UninstallString = $r.UninstallString; $app.Url = $r.Url; $app.RegKey = $r.Key
+                $app.UninstallString = $r.UninstallString; $app.Url = $r.Url; $app.RegKey = $r.Key; $app.DisplayIcon = $r.DisplayIcon
                 if (-not $app.ArpId) { $app.ArpId = $r.ArpId }
             }
             $k = $app.Key.ToLowerInvariant()
@@ -545,7 +545,7 @@ function Get-WPInventory {
             $app.Name = $r.Name; $app.Version = $r.Version; $app.Latest = $r.Version; $app.Kind = 'arp'
             $app.ArpId = $r.ArpId; $app.Key = 'arp:' + (Get-WPNormName $r.Name)
             $app.Publisher = $r.Publisher; $app.InstallLocation = $r.InstallLocation
-            $app.UninstallString = $r.UninstallString; $app.Url = $r.Url; $app.RegKey = $r.Key
+            $app.UninstallString = $r.UninstallString; $app.Url = $r.Url; $app.RegKey = $r.Key; $app.DisplayIcon = $r.DisplayIcon
             $k = $app.Key.ToLowerInvariant()
             if (-not $apps.Contains($k)) { $apps[$k] = $app }
         }
@@ -572,6 +572,243 @@ function Get-WPInventory {
 }
 
 #endregion
+
+#region App icons ---------------------------------------------------------------
+
+$script:WPIconCode = @"
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+
+namespace WinPrestige
+{
+    public static class IconTools
+    {
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern uint PrivateExtractIcons(string file, int index, int cx, int cy, IntPtr[] icons, uint[] ids, uint count, uint flags);
+        [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+
+        // Saves icon number 'index' (negative = resource id) from an exe/dll/ico as a size x size PNG.
+        public static bool SaveFromFile(string file, int index, int size, string png)
+        {
+            var handles = new IntPtr[1]; var ids = new uint[1];
+            uint n = PrivateExtractIcons(file, index, size, size, handles, ids, 1, 0);
+            if (n == 0 || n == 0xFFFFFFFF || handles[0] == IntPtr.Zero) return false;
+            try
+            {
+                using (var icon = Icon.FromHandle(handles[0]))
+                using (var bmp = icon.ToBitmap())
+                {
+                    if (IsBlank(bmp)) return false;
+                    bmp.Save(png, ImageFormat.Png);
+                }
+            }
+            finally { DestroyIcon(handles[0]); }
+            return true;
+        }
+
+        // Scales a PNG (such as a Store app logo) into a size x size PNG, keeping its proportions.
+        public static bool SaveFromImage(string file, int size, string png)
+        {
+            using (var img = Image.FromFile(file))
+            using (var bmp = new Bitmap(size, size, PixelFormat.Format32bppArgb))
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                double k = Math.Min((double)size / img.Width, (double)size / img.Height);
+                int w = (int)Math.Round(img.Width * k), h = (int)Math.Round(img.Height * k);
+                g.DrawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+                if (IsBlank(bmp)) return false;
+                bmp.Save(png, ImageFormat.Png);
+            }
+            return true;
+        }
+
+        static bool IsBlank(Bitmap b)
+        {
+            for (int y = 0; y < b.Height; y += 4)
+                for (int x = 0; x < b.Width; x += 4)
+                    if (b.GetPixel(x, y).A > 16) return false;
+            return true;
+        }
+    }
+}
+"@
+
+function Initialize-WPIconTools {
+    # Compiled once and cached next to the settings, so later scans don't pay for the compiler.
+    if ('WinPrestige.IconTools' -as [type]) { return $true }
+    $sha = New-Object Security.Cryptography.SHA1Managed
+    $hash = ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($script:WPIconCode))) -replace '-', '').Substring(0, 12)
+    $dll = Join-Path $script:WP.StateDir "IconTools-$hash.dll"
+    try {
+        if (-not (Test-Path -LiteralPath $dll)) { Add-Type -TypeDefinition $script:WPIconCode -ReferencedAssemblies System.Drawing -OutputAssembly $dll -OutputType Library -ErrorAction Stop }
+        Add-Type -Path $dll -ErrorAction Stop
+    } catch {
+        try { Add-Type -TypeDefinition $script:WPIconCode -ReferencedAssemblies System.Drawing -ErrorAction Stop } catch { return $false }
+    }
+    return [bool]('WinPrestige.IconTools' -as [type])
+}
+
+function Get-WPStartMenuIndex {
+    # Start Menu shortcuts by cleaned-up name: the icon Windows itself shows for an app.
+    $index = @{}
+    $roots = @((Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs'), (Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'))
+    $shell = $null
+    try { $shell = New-Object -ComObject WScript.Shell } catch { return $index }
+    foreach ($root in $roots) {
+        foreach ($lnk in @(Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -File -ErrorAction SilentlyContinue)) {
+            if ($lnk.BaseName -match '(?i)uninstall|readme|help|website|release notes') { continue }
+            $name = (Get-WPCleanName $lnk.BaseName).ToLowerInvariant()
+            if (-not $name -or $index.ContainsKey($name)) { continue }
+            try {
+                $sc = $shell.CreateShortcut($lnk.FullName)
+                $loc = [string]$sc.IconLocation; $target = [string]$sc.TargetPath
+                $file = ''; $idx = 0
+                if ($loc -match '^(.*),(-?\d+)$' -and $Matches[1].Trim()) { $file = [Environment]::ExpandEnvironmentVariables($Matches[1].Trim()); $idx = [int]$Matches[2] }
+                if (-not $file -or -not (Test-Path -LiteralPath $file)) { $file = $target; $idx = 0 }
+                if ($file -and (Test-Path -LiteralPath $file) -and $file -notmatch '(?i)\\unins[^\\]*\.exe$') { $index[$name] = @{ File = $file; Index = $idx } }
+            } catch { }
+        }
+    }
+    return $index
+}
+
+function Get-WPStoreLogo {
+    # The largest square logo a Store (MSIX) app ships, preferring the plain "unplated" version.
+    param([string]$InstallLocation)
+    $manifest = Join-Path $InstallLocation 'AppxManifest.xml'
+    if (-not (Test-Path -LiteralPath $manifest)) { return $null }
+    try { $xml = [xml](Get-Content -LiteralPath $manifest -Raw) } catch { return $null }
+    $rel = $null
+    foreach ($node in @($xml.GetElementsByTagName('*'))) {
+        if ($node.LocalName -eq 'VisualElements' -and $node.GetAttribute('Square44x44Logo')) { $rel = $node.GetAttribute('Square44x44Logo'); break }
+    }
+    if (-not $rel) { foreach ($node in @($xml.GetElementsByTagName('Logo'))) { $rel = $node.InnerText; break } }
+    if (-not $rel) { return $null }
+    $dir = Split-Path -Parent (Join-Path $InstallLocation $rel)
+    $base = [IO.Path]::GetFileNameWithoutExtension($rel)
+    $files = @(Get-ChildItem -LiteralPath $dir -Filter "$base*.png" -File -ErrorAction SilentlyContinue)
+    if ($files.Count -eq 0) { return $null }
+    $unplated = @($files | Where-Object { $_.Name -match 'altform-unplated' -and $_.Name -notmatch 'contrast' })
+    if ($unplated.Count) { $files = $unplated } else { $files = @($files | Where-Object { $_.Name -notmatch 'contrast' }) }
+    return ($files | Sort-Object Length -Descending | Select-Object -First 1).FullName
+}
+
+function Update-WPAppIcons {
+    # Finds each app's real icon and caches it as a 128 px PNG; apps without one keep their monogram.
+    # Order: Store logo, the uninstall entry's DisplayIcon, a Start Menu shortcut, the main exe.
+    param([object[]]$Apps)
+    if (-not (Initialize-WPIconTools)) { return }
+    $cache = Join-Path $script:WP.StateDir 'icons'
+    if (-not (Test-Path -LiteralPath $cache)) { New-Item -ItemType Directory -Path $cache -Force | Out-Null }
+    $menu = $null; $local = $null; $appxIndex = $null
+    $found = 0
+    foreach ($app in @($Apps)) {
+        if (-not $app -or -not $app.Key) { continue }
+        if (-not $app.PSObject.Properties['Icon']) { $app | Add-Member -NotePropertyName Icon -NotePropertyValue '' -Force }
+        $file = Join-Path $cache ((($app.Key.ToLowerInvariant()) -replace '[^a-z0-9._-]', '_') + '.png')
+        $miss = $file + '.none'
+        if ((Test-Path -LiteralPath $file) -and ((Get-Date) - (Get-Item -LiteralPath $file).LastWriteTime).TotalDays -lt 30) { $app.Icon = $file; $found++; continue }
+        if ((Test-Path -LiteralPath $miss) -and ((Get-Date) - (Get-Item -LiteralPath $miss).LastWriteTime).TotalDays -lt 7) { continue }
+
+        $clean = (Get-WPCleanName $app.Name).ToLowerInvariant()
+        $displayIcon = ''; $location = [string]$app.InstallLocation
+        if ($app.PSObject.Properties['DisplayIcon']) { $displayIcon = [string]$app.DisplayIcon }
+        if (-not $displayIcon -or -not $location) {
+            # Apps known only by name (winget-only rows, demo mode): find this PC's uninstall entry for them.
+            if ($null -eq $local) {
+                $local = @{}
+                foreach ($r in @(Get-WPRegistryApps)) { $n = (Get-WPCleanName $r.Name).ToLowerInvariant(); if ($n -and -not $local.ContainsKey($n)) { $local[$n] = $r } }
+            }
+            $r = $local[$clean]
+            if ($r) { if (-not $displayIcon) { $displayIcon = [string]$r.DisplayIcon }; if (-not $location) { $location = [string]$r.InstallLocation } }
+        }
+        $ok = $false
+        try {
+            if (-not $ok -and $location -and $location -match '\\WindowsApps\\') {
+                $logo = Get-WPStoreLogo $location
+                if ($logo) { $ok = [WinPrestige.IconTools]::SaveFromImage($logo, 128, $file) }
+            }
+            if (-not $ok -and $app.Kind -eq 'msix' -and $app.Pfn) {
+                $pkg = Get-AppxPackage -ErrorAction SilentlyContinue | Where-Object { $_.PackageFamilyName -eq $app.Pfn } | Select-Object -First 1
+                if ($pkg) { $logo = Get-WPStoreLogo $pkg.InstallLocation; if ($logo) { $ok = [WinPrestige.IconTools]::SaveFromImage($logo, 128, $file) } }
+            }
+            if (-not $ok -and ($app.WingetId -or $clean)) {
+                # Store-style packages installed outside the Store (Wave Link, Windows Terminal) have no shortcut file.
+                if ($null -eq $appxIndex) {
+                    $appxIndex = @()
+                    try { $appxIndex = @(Get-AppxPackage -ErrorAction Stop | Where-Object { -not $_.IsFramework -and -not $_.IsResourcePackage -and $_.InstallLocation }) } catch { }
+                }
+                $norm = ($clean -replace '[^a-z0-9]', '')
+                $pkg = $appxIndex | Where-Object { ($app.WingetId -and $_.Name -eq $app.WingetId) -or ($norm.Length -ge 6 -and (($_.Name.ToLowerInvariant() -replace '[^a-z0-9]', '') -eq $norm -or ($_.Name.ToLowerInvariant() -replace '[^a-z0-9]', '').EndsWith($norm))) } | Select-Object -First 1
+                if ($pkg) { $logo = Get-WPStoreLogo $pkg.InstallLocation; if ($logo) { $ok = [WinPrestige.IconTools]::SaveFromImage($logo, 128, $file) } }
+            }
+            if (-not $ok -and $displayIcon) {
+                $path = $displayIcon.Trim(); $idx = 0
+                if ($path -match '^(.*),\s*(-?\d+)$') { $path = $Matches[1]; $idx = [int]$Matches[2] }
+                $path = [Environment]::ExpandEnvironmentVariables($path.Trim().Trim('"'))
+                if ((Test-Path -LiteralPath $path) -and $path -notmatch '(?i)\\unins[^\\]*\.exe$|msiexec\.exe$') {
+                    if ($path -match '(?i)\.png$') { $ok = [WinPrestige.IconTools]::SaveFromImage($path, 128, $file) }
+                    else { $ok = [WinPrestige.IconTools]::SaveFromFile($path, $idx, 128, $file) }
+                }
+            }
+            if (-not $ok -and $clean) {
+                if ($null -eq $menu) { $menu = Get-WPStartMenuIndex }
+                $hit = $menu[$clean]
+                if (-not $hit) { foreach ($k in $menu.Keys) { if ($k.StartsWith($clean) -or $clean.StartsWith($k)) { if ($k.Length -ge 4) { $hit = $menu[$k]; break } } } }
+                if (-not $hit) { foreach ($k in $menu.Keys) { if ($k.Length -ge 4 -and ($clean -match ("\b" + [regex]::Escape($k) + "\b") -or ($clean.Length -ge 5 -and $k -match ("\b" + [regex]::Escape($clean) + "\b")))) { $hit = $menu[$k]; break } } }
+                if ($hit) { $ok = [WinPrestige.IconTools]::SaveFromFile($hit.File, $hit.Index, 128, $file) }
+            }
+            if (-not $ok -and $location -and (Test-Path -LiteralPath $location)) {
+                $first = (($clean -split ' ') | Where-Object { $_.Length -ge 3 } | Select-Object -First 1)
+                $exes = @(Get-ChildItem -LiteralPath $location -Filter '*.exe' -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch '(?i)^(unins|update|crash|helper|setup|install|vc_redist)' })
+                $exe = $null
+                if ($first) { $exe = $exes | Where-Object { $_.BaseName -match [regex]::Escape($first) } | Sort-Object Length -Descending | Select-Object -First 1 }
+                if (-not $exe) { $exe = $exes | Sort-Object Length -Descending | Select-Object -First 1 }
+                if ($exe) { $ok = [WinPrestige.IconTools]::SaveFromFile($exe.FullName, 0, 128, $file) }
+            }
+        } catch { $ok = $false }
+        if ($ok) { $app.Icon = $file; $found++; if (Test-Path -LiteralPath $miss) { [IO.File]::Delete($miss) } }
+        else { [IO.File]::WriteAllText($miss, '') }
+    }
+    Write-WPLog ("Found icons for {0} of {1} apps." -f $found, @($Apps).Count) 'info'
+}
+
+function Save-WPBackupIcon {
+    # Copies an app's cached icon into the backup, so the Restore screen on a fresh PC can show it.
+    param([string]$Icon, [string]$Destination)
+    if (-not $Icon -or -not (Test-Path -LiteralPath $Icon)) { return '' }
+    $dir = Join-Path $Destination 'Icons'
+    if (-not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+    $name = Split-Path -Leaf $Icon
+    try { Copy-Item -LiteralPath $Icon -Destination (Join-Path $dir $name) -Force } catch { return '' }
+    return "Icons\$name"
+}
+
+function Find-WPConfigIcon {
+    # A settings entry borrows the icon of the app it belongs to.
+    param($Config, [object[]]$Apps)
+    foreach ($a in @($Apps)) {
+        if (-not $a -or -not $a.PSObject.Properties['Icon'] -or -not $a.Icon) { continue }
+        if ($Config.App -and $a.Name -match $Config.App) { return $a.Icon }
+    }
+    $cn = (Get-WPCleanName ([string]$Config.Name)).ToLowerInvariant()
+    foreach ($a in @($Apps)) {
+        if (-not $a -or -not $a.PSObject.Properties['Icon'] -or -not $a.Icon) { continue }
+        $an = (Get-WPCleanName $a.Name).ToLowerInvariant()
+        if ($an -and $cn -and ($cn.StartsWith($an) -or $an.StartsWith($cn))) { return $a.Icon }
+    }
+    return ''
+}
+
+#endregion
+
+
 
 #region Download links --------------------------------------------------------
 
@@ -1550,7 +1787,7 @@ function Invoke-WPBackup {
             if ($r.Bytes) { $msg += " ($(Format-WPSize $r.Bytes))" }
             if ($r.Detail) { $msg += " - $($r.Detail)" }
             Write-WPLog $msg $level
-            $configEntries += [ordered]@{ Id = $c.Id; Name = $c.Name; App = $c.App; Folder = $r.Folder; Status = $r.Status; Detail = $r.Detail; Bytes = $r.Bytes; Notes = $c.Notes; Sensitive = [bool]$c.Sensitive }
+            $configEntries += [ordered]@{ Id = $c.Id; Name = $c.Name; App = $c.App; Folder = $r.Folder; Status = $r.Status; Detail = $r.Detail; Bytes = $r.Bytes; Notes = $c.Notes; Sensitive = [bool]$c.Sensitive; Icon = (Save-WPBackupIcon (Find-WPConfigIcon $c $Apps) $dest) }
         }
     } elseif (-not $Options.Configs -and $prev) {
         $configEntries = @($prev.configs)

@@ -175,6 +175,8 @@ function Get-WPDemoApps {
     }
     foreach ($a in $apps) { Set-WPDefaultSelection $a @{} }
     if (-not $Quiet) { Write-WPLog ("Found {0} installed items." -f $apps.Count) 'ok' }
+    # Icons come from this PC when the same app is installed here; the others keep their monogram.
+    Update-WPAppIcons $apps
     return $apps
 }
 
@@ -266,7 +268,7 @@ function New-WPDemoEntry {
         Key = $App.Key; Name = $App.Name; Version = $App.Version; Publisher = $App.Publisher
         Category = $App.Category; Via = $App.Via; Selected = [bool]$App.Selected
         WingetId = $App.WingetId; Source = $App.Source; Match = $App.Match; Pfn = $App.Pfn
-        Url = $App.Url; CustomUrl = $App.CustomUrl; GameUri = $App.GameUri; LauncherGame = [bool]$App.LauncherGame
+        Url = $App.Url; CustomUrl = $App.CustomUrl; GameUri = $App.GameUri; LauncherGame = [bool]$App.LauncherGame; Icon = [string]$App.Icon
         Download = $Download; Method = ''
     }
     $entry.Method = Get-WPMethod ([pscustomobject]$entry)
@@ -396,7 +398,7 @@ function Get-WPDemoManifest {
     }
     $configs = @()
     foreach ($c in @(Get-WPDemoConfigs -Quiet | Where-Object { $_.Selected })) {
-        $configs += [ordered]@{ Id = $c.Id; Name = $c.Name; Folder = (Get-WPSafeName $c.Name); Status = 'Saved'; Detail = ''; Bytes = $c.Bytes; Notes = $c.Notes }
+        $configs += [ordered]@{ Id = $c.Id; Name = $c.Name; Folder = (Get-WPSafeName $c.Name); Status = 'Saved'; Detail = ''; Bytes = $c.Bytes; Notes = $c.Notes; Icon = (Find-WPConfigIcon $c $apps) }
     }
     $extras = @(
         [ordered]@{ Id = 'fonts'; Name = 'Fonts you installed'; Folder = 'Fonts'; Status = 'Saved'; Detail = '37 fonts' },
