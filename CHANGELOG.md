@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Synced folders as a destination.** OneDrive, Google Drive for desktop and Dropbox folders are detected and offered next to NAS shares and drives. WinPrestige writes to them like any folder and says plainly that it can't see whether the upload has finished: after the backup it asks you to check the folder on the web or another device, remembers when you confirm, and explains how to get the backup back after the reset. Backups in synced folders are also found automatically after a reset.
+- **Ready to reset.** After a backup, a summary shows saved installers, online installs, manual actions, app settings, extras and problems (such as installer files missing from the backup), checked against the files in the folder. It's saved as `Ready to reset.html` in the backup.
+- **Restore check.** After installing, WinPrestige checks what Windows actually lists. Apps whose installer exited cleanly but that Windows doesn't list are reported as not found instead of installed. The summary and a restore report show installed, already installed, manual and failed apps, and settings in place or to check.
+- **Safe reruns and settings undo.** App settings that already match the backup are left alone on a repeat restore. Before replacing settings, WinPrestige saves what was there; **Revert** on the Restore screen (or `Restore-Config.ps1 -Revert`) puts it back.
+- **App lists.** **Export app list...** saves the ticked apps (names and install sources only) to set up another PC; load the file on the Restore screen.
+
 - **App icons.** The scan finds each app's real icon (from its uninstall entry, its Start Menu shortcut, its exe, or its Store package logo) and shows it on the Apps, App settings and Restore screens, with the coloured monogram as a fallback. Icons are cached and saved into the backup, so a freshly reset PC sees them on the Restore screen before anything is installed. Demo mode borrows icons from this PC when the same app is installed.
 - Elgato Wave Link 3 settings are now backed up. Wave Link 3 installs as a Windows package and keeps your mixes and mic filter chains in `AppData\Local\Packages\Elgato.WaveLink_...\LocalState`; only the old Wave Link folder was saved before.
 - New **VST audio plugins** entry backs up `Common Files\VST3`, `VST2`, `CLAP` and the usual `VSTPlugins` folders and puts them back, so Wave Link filters, OBS and Voicemod find their plugins (ReaPlugs, Voxengo SPAN, Elgato's own filters and others that have no installer to save).

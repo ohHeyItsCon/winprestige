@@ -380,8 +380,13 @@ function Invoke-WPDemoBackup {
     $reportDir = Join-Path $env:TEMP 'WinPrestige-demo'
     New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
     Export-WPReport $manifest $reportDir
+    # Same readiness check as a real backup; the demo's files don't exist, so they're assumed present.
+    $ready = Get-WPReadiness $Destination ($manifest | ConvertTo-Json -Depth 10 | ConvertFrom-Json) -AssumeFiles
+    Export-WPReadinessReport $ready (Join-Path $reportDir 'Ready to reset.html')
+    Write-WPLog ("Ready to reset: {0} saved installers, {1} install online, {2} need manual action, {3} app settings, {4} problems." -f $ready.Counts.saved, $ready.Counts.online, $ready.Counts.manual, $ready.ConfigsOk, @($ready.Problems).Count) 'ok'
+    if ($ready.Sync) { Write-WPLog ("This folder is synced by {0}. Check it on the web or another device before you reset; WinPrestige can't see whether it has uploaded." -f $ready.Sync.Provider) 'warn' }
     Write-WPLog ("Backup finished in 03:42. Report: {0}" -f (Join-Path $Destination 'AppInventory.html')) 'ok'
-    return @{ Cancelled = $false; Failed = 1; Report = (Join-Path $reportDir 'AppInventory.html'); Destination = $Destination; Added = @(); Removed = @() }
+    return @{ Cancelled = $false; Failed = 1; Report = (Join-Path $reportDir 'AppInventory.html'); Destination = $Destination; Added = @(); Removed = @(); Readiness = $ready; ReadyReport = (Join-Path $reportDir 'Ready to reset.html') }
 }
 
 function Get-WPDemoManifest {
@@ -424,9 +429,11 @@ function Invoke-WPDemoRestore {
     $order = @{ runtimes = 0; drivers = 1; launchers = 2; apps = 3; store = 4; bundled = 5 }
     $list = @($Entries | Sort-Object { $order[[string]$_.Category] }, Name)
     $stats = @{ ok = 0; manual = 0; skipped = 0; finished = 0; total = $list.Count }
+    $results = @{}
     $finish = {
         param($e, [string]$Detail, [string]$Level)
         $stats.finished++
+        $results[[string]$e.Key] = @{ Level = $Level; Detail = $Detail }
         if ($Level -eq 'ok') { $stats.ok++ } elseif ($Level -eq 'warn') { $stats.manual++ } else { $stats.skipped++ }
         Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = $Detail; Level = $Level }
         Write-WPLog ("{0}: {1}" -f $e.Name, $Detail) $Level
@@ -481,6 +488,17 @@ function Invoke-WPDemoRestore {
             & $finish $e $detail 'ok'
         }
     }
+    $appResults = @()
+    if (-not $test -and -not (Test-WPCancel)) {
+        Write-WPLog 'Checking which apps Windows now lists as installed...' 'step'
+        Start-Sleep -Milliseconds 700
+        foreach ($e in $list) {
+            $r = $results[[string]$e.Key]; if (-not $r) { continue }
+            $outcome = @{ ok = 'installed'; info = 'present'; warn = 'manual' }[$r.Level]
+            $appResults += [pscustomobject]@{ Name = [string]$e.Name; Outcome = $outcome; Detail = $r.Detail; Link = [string]$e.Url }
+        }
+    }
+    $cfgResults = @()
     if (-not (Test-WPCancel) -and @($Configs).Count) {
         Write-WPLog 'Putting app settings back...' 'step'
         foreach ($c in @($Configs)) {
@@ -490,6 +508,7 @@ function Invoke-WPDemoRestore {
             $msg = $(if ($test) { "Test run finished for $($c.Name)." } else { "Restored $($c.Name): $(4 + $rand.Next(60)) files checked and in place." })
             Send-WPMessage 'restoreItem' @{ Key = 'config:' + $c.Id; Status = $msg; Level = 'ok' }
             Write-WPLog ("{0} settings restored" -f $c.Name) 'ok'
+            $cfgResults += [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = 'ok'; Detail = $msg }
         }
     }
     if (-not (Test-WPCancel) -and @($Extras).Count) {
@@ -501,7 +520,7 @@ function Invoke-WPDemoRestore {
             Write-WPLog ("{0}: {1}" -f $x.Name, $msg) 'ok'
         }
     }
-    Write-WPLog ("Done: {0} installed, {1} already there, {2} manual, 0 failed." -f $stats.ok, $stats.skipped, $stats.manual) 'ok'
-    if ($stats.manual) { Write-WPLog 'Use "Manual links" for the rest, then restart the PC.' 'info' }
-    return @{ Ok = $stats.ok; Failed = 0; Manual = $stats.manual; Skipped = $stats.skipped; Complete = (-not (Test-WPCancel)); RestartNeeded = $true }
+    Write-WPLog ("Done: {0} installed and found, {1} already there, {2} need manual action, 0 failed or not found. Settings: {3} in place, 0 need a look." -f $stats.ok, $stats.skipped, $stats.manual, $cfgResults.Count) 'ok'
+    if ($stats.manual) { Write-WPLog 'Use "Open manual links" for the rest, then restart the PC.' 'info' }
+    return @{ Ok = $stats.ok; Failed = 0; Manual = $stats.manual; Skipped = $stats.skipped; Unverified = 0; ConfigsOk = $cfgResults.Count; ConfigsBad = 0; Report = ''; Apps = $appResults; Configs = $cfgResults; Complete = (-not (Test-WPCancel)); RestartNeeded = $true }
 }

@@ -1305,6 +1305,266 @@ function Update-WPExtraSize {
 
 #endregion
 
+#region Synced folders, readiness, verification, app lists ----------------------
+
+function Get-WPSyncFolders {
+    # Folders on this PC that a cloud provider's own sync app keeps uploaded. WinPrestige only
+    # writes to them like any folder; whether they've uploaded is up to that app.
+    $list = @()
+    $seen = @{}
+    function Add-Sync($provider, $label, $path, $web) {
+        if (-not $path) { return }
+        $p = ([string]$path).TrimEnd('\')
+        if (-not (Test-Path -LiteralPath $p) -or $seen[$p.ToLowerInvariant()]) { return }
+        $seen[$p.ToLowerInvariant()] = $true
+        $script:syncList += [pscustomobject]@{ Provider = $provider; Label = $label; Path = $p; Web = $web }
+    }
+    $script:syncList = @()
+    try {
+        foreach ($acct in @(Get-ChildItem 'HKCU:\Software\Microsoft\OneDrive\Accounts' -ErrorAction SilentlyContinue)) {
+            $v = Get-ItemProperty -LiteralPath $acct.PSPath -ErrorAction SilentlyContinue
+            if (-not $v -or -not $v.UserFolder) { continue }
+            $business = $acct.PSChildName -like 'Business*'
+            $label = $(if ($business -and $v.DisplayName) { "OneDrive - $($v.DisplayName)" } elseif ($business) { 'OneDrive (work)' } else { 'OneDrive' })
+            $web = $(if ($business) { 'https://www.microsoft365.com/onedrive' } else { 'https://onedrive.live.com' })
+            Add-Sync 'OneDrive' $label $v.UserFolder $web
+        }
+    } catch { }
+    Add-Sync 'OneDrive' 'OneDrive' $env:OneDriveConsumer 'https://onedrive.live.com'
+    if ($env:OneDriveCommercial) { Add-Sync 'OneDrive' 'OneDrive (work)' $env:OneDriveCommercial 'https://www.microsoft365.com/onedrive' }
+    foreach ($info in @((Join-Path $env:LOCALAPPDATA 'Dropbox\info.json'), (Join-Path $env:APPDATA 'Dropbox\info.json'))) {
+        if (-not (Test-Path -LiteralPath $info)) { continue }
+        try {
+            $j = Get-Content -LiteralPath $info -Raw | ConvertFrom-Json
+            if ($j.personal) { Add-Sync 'Dropbox' 'Dropbox' $j.personal.path 'https://www.dropbox.com/home' }
+            if ($j.business) { Add-Sync 'Dropbox' 'Dropbox (work)' $j.business.path 'https://www.dropbox.com/home' }
+        } catch { }
+    }
+    # Google Drive for desktop shows up as a drive (usually G:) with a "My Drive" folder.
+    foreach ($d in @([IO.DriveInfo]::GetDrives())) {
+        try {
+            if (-not $d.IsReady) { continue }
+            $my = Join-Path $d.RootDirectory.FullName 'My Drive'
+            if ($d.VolumeLabel -match 'Google Drive' -or ($d.DriveFormat -eq 'FAT32' -and (Test-Path -LiteralPath $my) -and (Test-Path -LiteralPath (Join-Path $d.RootDirectory.FullName '.shortcut-targets-by-id')))) {
+                if (Test-Path -LiteralPath $my) { Add-Sync 'Google Drive' 'Google Drive' $my 'https://drive.google.com' }
+            }
+        } catch { }
+    }
+    $list = $script:syncList
+    return @($list)
+}
+
+function Get-WPSyncProvider {
+    # Which sync app, if any, looks after this path. Recognises the folders found above, plus common
+    # names in the path for setups the registry doesn't describe (best effort, labelled as such).
+    param([string]$Path, [object[]]$Folders)
+    if (-not $Path) { return $null }
+    $p = $Path.TrimEnd('\')
+    if ($null -eq $Folders) { $Folders = @(Get-WPSyncFolders) }
+    foreach ($f in @($Folders)) {
+        if ($p.Equals($f.Path, [StringComparison]::OrdinalIgnoreCase) -or $p.StartsWith($f.Path + '\', [StringComparison]::OrdinalIgnoreCase)) { return $f }
+    }
+    if ($p -match '(?i)\\OneDrive( - [^\\]+)?(\\|$)') { return [pscustomobject]@{ Provider = 'OneDrive'; Label = 'OneDrive'; Path = ''; Web = 'https://onedrive.live.com'; Guessed = $true } }
+    if ($p -match '(?i)\\Dropbox( \([^\\]+\))?(\\|$)') { return [pscustomobject]@{ Provider = 'Dropbox'; Label = 'Dropbox'; Path = ''; Web = 'https://www.dropbox.com/home'; Guessed = $true } }
+    if ($p -match '(?i)^[A-Z]:\\My Drive(\\|$)') { return [pscustomobject]@{ Provider = 'Google Drive'; Label = 'Google Drive'; Path = ''; Web = 'https://drive.google.com'; Guessed = $true } }
+    return $null
+}
+
+function Get-WPSyncAdvice {
+    # Plain-language steps for a backup kept in a synced folder: before the reset, and after it.
+    param($Sync)
+    $name = $Sync.Provider
+    $before = "WinPrestige saved the backup into your $name folder on this PC. That doesn't mean it has uploaded: $name does that in the background. Before you reset, open $name on the web ($($Sync.Web)) or on another device and check the WinPrestige Backup folder is there and finished syncing."
+    $after = switch ($name) {
+        'OneDrive' { 'After the reset, sign in to Windows with the same Microsoft account (or open OneDrive and sign in), wait for the WinPrestige Backup folder to finish downloading, then open it and run Restore.cmd, or pick it in WinPrestige.' }
+        'Google Drive' { 'After the reset, install Google Drive for desktop and sign in, right-click the WinPrestige Backup folder in My Drive and choose to make it available offline, then open it and run Restore.cmd, or pick it in WinPrestige.' }
+        'Dropbox' { 'After the reset, install Dropbox and sign in, right-click the WinPrestige Backup folder and make it available offline, then open it and run Restore.cmd, or pick it in WinPrestige.' }
+        default { 'After the reset, sign in to the sync app again and let the WinPrestige Backup folder download before restoring.' }
+    }
+    return @{ Before = $before; After = $after }
+}
+
+function Get-WPReadiness {
+    # What a restore from this backup will do, checked against the files actually in it.
+    param([string]$Root, $Manifest, [switch]$AssumeFiles)
+    $root = $Root.TrimEnd('\')
+    if (-not $Manifest) { $Manifest = Read-WPJson (Join-Path $root 'manifest.json') }
+    $apps = @(); $problems = @()
+    $counts = [ordered]@{ saved = 0; online = 0; manual = 0; missing = 0 }
+    foreach ($e in @($Manifest.apps)) {
+        if (-not $e.Selected -or @('games', 'system') -contains [string]$e.Category) { continue }
+        $method = [string]$e.Method; $group = ''; $note = ''
+        switch ($method) {
+            'local' {
+                $file = Join-Path $root ("Installers\" + $e.Download.Folder + "\" + $e.Download.Installer)
+                if ($AssumeFiles -or (Test-Path -LiteralPath $file)) { $group = 'saved'; $note = [string]$e.Download.Installer }
+                else {
+                    $group = 'missing'; $note = 'Installer file is missing from the backup'
+                    if ($e.WingetId) { $note += '; the restore will install it with winget online instead' }
+                    $problems += "$($e.Name): installer file missing"
+                }
+            }
+            'winget' { $group = 'online'; $note = $(if ($e.Download -and $e.Download.Status -eq 'Failed') { "Download failed ($($e.Download.Error)); installs with winget online" } else { "winget online ($($e.WingetId))" }) }
+            'store' { $group = 'online'; $note = "Microsoft Store ($($e.WingetId))" }
+            'storelink' { $group = 'manual'; $note = 'Opens its Microsoft Store page; you click Get' }
+            default { $group = 'manual'; $note = $(if ($e.Url -or $e.CustomUrl) { 'Download it yourself; the link is in the report' } else { 'Download it yourself' }) }
+        }
+        $counts[$group] = 1 + [int]$counts[$group]
+        $apps += [pscustomobject]@{ Name = [string]$e.Name; Group = $group; Note = $note }
+    }
+    $configs = @()
+    foreach ($c in @($Manifest.configs)) {
+        $ok = @('Saved', 'Partial') -contains [string]$c.Status
+        $there = $AssumeFiles -or (Test-Path -LiteralPath (Join-Path $root ("Configs\" + $c.Folder + "\restore.json")))
+        $st = $(if (-not $ok) { 'failed' } elseif (-not $there) { 'missing' } elseif ($c.Status -eq 'Partial') { 'partial' } else { 'ok' })
+        if ($st -ne 'ok') { $problems += "$($c.Name) settings: $(@{ failed = 'not saved'; missing = 'folder missing from the backup'; partial = 'some files were in use when copied' }[$st])" }
+        $configs += [pscustomobject]@{ Name = [string]$c.Name; State = $st; Detail = [string]$c.Detail }
+    }
+    $extras = @()
+    foreach ($x in @($Manifest.extras)) {
+        $ok = @('Saved', 'Partial') -contains [string]$x.Status
+        $there = $AssumeFiles -or -not $x.Folder -or (Test-Path -LiteralPath (Join-Path $root ("Extras\" + $x.Folder)))
+        $st = $(if (-not $ok) { 'failed' } elseif (-not $there) { 'missing' } else { 'ok' })
+        if ($st -ne 'ok') { $problems += "$($x.Name): $(@{ failed = 'not saved'; missing = 'missing from the backup' }[$st])" }
+        $extras += [pscustomobject]@{ Name = [string]$x.Name; State = $st; Detail = [string]$x.Detail }
+    }
+    if (-not $AssumeFiles -and -not (Test-Path -LiteralPath (Join-Path $root 'Restore.cmd'))) { $problems += 'Restore.cmd is missing from the backup folder' }
+    $sync = Get-WPSyncProvider $root
+    return [pscustomobject]@{
+        Root = $root; Created = [string]$Manifest.created; Computer = [string]$Manifest.computer
+        Apps = $apps; Counts = $counts; Configs = $configs; Extras = $extras; Problems = $problems
+        ConfigsOk = @($configs | Where-Object { $_.State -eq 'ok' }).Count; Sync = $sync
+    }
+}
+
+function Export-WPReadinessReport {
+    param($Readiness, [string]$Path)
+    $h = { param($s) ConvertTo-WPHtml ([string]$s) }
+    $c = $Readiness.Counts
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.Append('<!doctype html><html><head><meta charset="utf-8"><title>Ready to reset</title><style>')
+    [void]$sb.Append('body{font-family:Segoe UI,sans-serif;background:#0b1220;color:#e6ebf2;margin:32px;max-width:980px}h1{margin:0 0 4px}h2{margin:28px 0 8px;font-size:18px}.m{color:#9aa6b8}')
+    [void]$sb.Append('.tiles{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}.t{background:#141d2e;border-radius:10px;padding:10px 16px;min-width:130px}.t b{display:block;font-size:24px}')
+    [void]$sb.Append('table{border-collapse:collapse;width:100%}td{padding:6px 8px;border-bottom:1px solid #1f2a3d;vertical-align:top}.ok{color:#4fd1a5}.warn{color:#f5b04c}.bad{color:#ff6b6b}.box{background:#141d2e;border-radius:10px;padding:12px 16px;margin:12px 0}')
+    [void]$sb.Append('</style></head><body>')
+    [void]$sb.Append("<h1>Ready to reset</h1><div class=`"m`">Backup of $(& $h $Readiness.Computer), checked $(Get-Date -Format 'd MMM yyyy HH:mm'). Folder: $(& $h $Readiness.Root)</div>")
+    [void]$sb.Append('<div class="tiles">')
+    foreach ($t in @(@($c.saved, 'saved installers', 'ok'), @($c.online, 'install online', ''), @($c.manual, 'need manual action', 'warn'), @($Readiness.ConfigsOk, "app settings included", 'ok'), @(@($Readiness.Extras).Count, 'extras', ''), @(@($Readiness.Problems).Count, 'problems', $(if (@($Readiness.Problems).Count) { 'bad' } else { 'ok' })))) {
+        [void]$sb.Append("<div class=`"t`"><b class=`"$($t[2])`">$($t[0])</b>$($t[1])</div>")
+    }
+    [void]$sb.Append('</div>')
+    if (@($Readiness.Problems).Count) {
+        [void]$sb.Append('<div class="box"><b class="bad">Fix or accept these before you reset:</b><ul>')
+        foreach ($p in $Readiness.Problems) { [void]$sb.Append("<li>$(& $h $p)</li>") }
+        [void]$sb.Append('</ul></div>')
+    }
+    if ($Readiness.Sync) {
+        $adv = Get-WPSyncAdvice $Readiness.Sync
+        [void]$sb.Append("<div class=`"box`"><b class=`"warn`">Saved in your $(& $h $Readiness.Sync.Provider) folder - not yet confirmed online</b><p>$(& $h $adv.Before)</p><p>$(& $h $adv.After)</p></div>")
+    }
+    foreach ($grp in @(@('saved', 'Saved installers', 'ok'), @('missing', 'Installer missing from the backup', 'bad'), @('online', 'Installs online (winget or Microsoft Store)', ''), @('manual', 'Needs manual action', 'warn'))) {
+        $rows = @($Readiness.Apps | Where-Object { $_.Group -eq $grp[0] })
+        if (-not $rows.Count) { continue }
+        [void]$sb.Append("<h2 class=`"$($grp[2])`">$($grp[1]) ($($rows.Count))</h2><table>")
+        foreach ($r in $rows) { [void]$sb.Append("<tr><td>$(& $h $r.Name)</td><td class=`"m`">$(& $h $r.Note)</td></tr>") }
+        [void]$sb.Append('</table>')
+    }
+    foreach ($sec in @(@($Readiness.Configs, 'App settings'), @($Readiness.Extras, 'Extras'))) {
+        if (-not @($sec[0]).Count) { continue }
+        [void]$sb.Append("<h2>$($sec[1])</h2><table>")
+        foreach ($r in @($sec[0])) {
+            $cls = @{ ok = 'ok'; partial = 'warn'; missing = 'bad'; failed = 'bad' }[$r.State]
+            $txt = @{ ok = 'Saved'; partial = 'Saved, some files were in use'; missing = 'Missing from the backup'; failed = 'Not saved' }[$r.State]
+            [void]$sb.Append("<tr><td>$(& $h $r.Name)</td><td class=`"$cls`">$txt</td><td class=`"m`">$(& $h $r.Detail)</td></tr>")
+        }
+        [void]$sb.Append('</table>')
+    }
+    [void]$sb.Append('<p class="m">WinPrestige checked that these files exist in the backup folder. It cannot check that a cloud copy has finished uploading.</p></body></html>')
+    [IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object Text.UTF8Encoding $false))
+}
+
+function Get-WPInstalledIndexFull {
+    # Get-WPInstalledIndex plus Store packages, for checking what actually got installed.
+    $idx = Get-WPInstalledIndex
+    $idx.Pfns = @{}
+    try { foreach ($p in @(Get-AppxPackage -ErrorAction Stop)) { $idx.Pfns[$p.PackageFamilyName.ToLowerInvariant()] = $true; $idx.Names[(Get-WPNormName $p.Name)] = $true } } catch { }
+    return $idx
+}
+
+function Test-WPInstalledFull {
+    param($Entry, $Index)
+    if (Test-WPInstalled $Entry $Index) { return $true }
+    if ($Entry.Pfn -and $Index.Pfns -and $Index.Pfns[([string]$Entry.Pfn).ToLowerInvariant()]) { return $true }
+    return $false
+}
+
+function Export-WPRestoreReport {
+    param($Results, [string]$Path, [string]$Computer)
+    $h = { param($s) ConvertTo-WPHtml ([string]$s) }
+    $sb = New-Object Text.StringBuilder
+    [void]$sb.Append('<!doctype html><html><head><meta charset="utf-8"><title>Restore check</title><style>body{font-family:Segoe UI,sans-serif;background:#0b1220;color:#e6ebf2;margin:32px;max-width:980px}h2{margin:26px 0 8px;font-size:18px}.m{color:#9aa6b8}table{border-collapse:collapse;width:100%}td{padding:6px 8px;border-bottom:1px solid #1f2a3d}.ok{color:#4fd1a5}.warn{color:#f5b04c}.bad{color:#ff6b6b}</style></head><body>')
+    [void]$sb.Append("<h1>Restore check</h1><div class=`"m`">$(Get-Date -Format 'd MMM yyyy HH:mm') - backup of $(& $h $Computer). An app counts as installed only when Windows lists it afterwards.</div>")
+    $groups = @(@('installed', 'Installed and found by Windows', 'ok'), @('present', 'Already installed', 'ok'), @('unverified', 'Installer finished, but Windows does not list the app', 'warn'), @('manual', 'Needs manual action', 'warn'), @('failed', 'Failed', 'bad'))
+    foreach ($g in $groups) {
+        $rows = @($Results.Apps | Where-Object { $_.Outcome -eq $g[0] })
+        if (-not $rows.Count) { continue }
+        [void]$sb.Append("<h2 class=`"$($g[2])`">$($g[1]) ($($rows.Count))</h2><table>")
+        foreach ($r in $rows) {
+            $link = $(if ($r.Link) { "<a style=`"color:#8ab4ff`" href=`"$(& $h $r.Link)`">download page</a>" } else { '' })
+            [void]$sb.Append("<tr><td>$(& $h $r.Name)</td><td class=`"m`">$(& $h $r.Detail)</td><td>$link</td></tr>")
+        }
+        [void]$sb.Append('</table>')
+    }
+    if (@($Results.Configs).Count) {
+        [void]$sb.Append('<h2>App settings</h2><table>')
+        foreach ($r in $Results.Configs) {
+            $cls = @{ ok = 'ok'; present = 'ok'; warn = 'warn'; failed = 'bad' }[$r.Outcome]
+            [void]$sb.Append("<tr><td>$(& $h $r.Name)</td><td class=`"$cls`">$(& $h $r.Detail)</td></tr>")
+        }
+        [void]$sb.Append('</table>')
+    }
+    [void]$sb.Append('</body></html>')
+    [IO.File]::WriteAllText($Path, $sb.ToString(), (New-Object Text.UTF8Encoding $false))
+}
+
+function Export-WPAppList {
+    # The ticked apps for another PC: names and where they come from. No settings, credentials,
+    # paths, versions, personal download links or installer files.
+    param([object[]]$Apps, [string]$Path)
+    $rows = @()
+    foreach ($a in @($Apps | Where-Object { $_.Selected -and @('games', 'system', 'bundled', 'drivers') -notcontains $_.Category })) {
+        $url = ''
+        if ($a.Url -and $a.Url -match '^https://') { $url = [string]$a.Url }
+        $rows += [ordered]@{ Name = (Get-WPCleanName $a.Name); WingetId = [string]$a.WingetId; Source = [string]$a.Source; Pfn = [string]$a.Pfn; Category = [string]$a.Category; Url = $url }
+    }
+    $doc = [ordered]@{ tool = 'WinPrestige'; kind = 'app-list'; version = $script:WP.Version; created = (Get-Date).ToString('s'); apps = $rows }
+    Write-WPJson $doc $Path
+    return $rows.Count
+}
+
+function ConvertFrom-WPAppList {
+    # Turns an exported app list into something the Restore screen can load: everything installs
+    # online (winget or the Store) or opens its download page.
+    param([string]$Path)
+    $doc = Read-WPJson $Path
+    if (-not $doc -or $doc.kind -ne 'app-list') { return $null }
+    $entries = @()
+    foreach ($r in @($doc.apps)) {
+        $e = [ordered]@{
+            Key = $(if ($r.WingetId) { [string]$r.WingetId } elseif ($r.Pfn) { 'msix:' + ([string]$r.Pfn).ToLowerInvariant() } else { 'arp:' + (Get-WPNormName $r.Name) })
+            Name = [string]$r.Name; Version = ''; Publisher = ''; Category = $(if ($r.Category) { [string]$r.Category } else { 'apps' }); Via = ''; Selected = $true
+            WingetId = [string]$r.WingetId; Source = [string]$r.Source; Match = ''; Pfn = [string]$r.Pfn; Url = [string]$r.Url; CustomUrl = ''; GameUri = ''; LauncherGame = $false
+            Download = $null; Method = ''; Icon = ''
+        }
+        $e.Method = Get-WPMethod ([pscustomobject]$e)
+        $entries += $e
+    }
+    $m = [ordered]@{ tool = 'WinPrestige'; version = [string]$doc.version; created = [string]$doc.created; computer = 'app list'; user = ''; userProfile = ''; windows = ''; apps = $entries; dependencies = @(); configs = @(); extras = @(); added = @(); removed = @(); appList = $true }
+    return ((ConvertTo-Json -InputObject $m -Depth 8) | ConvertFrom-Json)
+}
+
+#endregion
+
 #region Copying ---------------------------------------------------------------
 
 function Invoke-WPRobocopy {
@@ -1867,10 +2127,17 @@ function Invoke-WPBackup {
     Write-WPJson $manifest "$dest\manifest.json"
     Copy-WPSelf $dest
     Export-WPReport $manifest $dest
+    $ready = $null
+    try {
+        $ready = Get-WPReadiness $dest ([pscustomobject]$manifest | ConvertTo-Json -Depth 10 | ConvertFrom-Json)
+        Export-WPReadinessReport $ready "$dest\Ready to reset.html"
+        Write-WPLog ("Ready to reset: {0} saved installers, {1} install online, {2} need manual action, {3} app settings, {4} problems." -f $ready.Counts.saved, $ready.Counts.online, $ready.Counts.manual, $ready.ConfigsOk, @($ready.Problems).Count) $(if (@($ready.Problems).Count) { 'warn' } else { 'ok' })
+        if ($ready.Sync) { Write-WPLog ("This folder is synced by {0}. Check it on the web or another device before you reset; WinPrestige can't see whether it has uploaded." -f $ready.Sync.Provider) 'warn' }
+    } catch { Write-WPLog ("Couldn't check the backup: {0}" -f $_.Exception.Message) 'warn' }
     $elapsed = (Get-Date) - $started
     $failed = @($entries | Where-Object { $_.Selected -and $_.Download -and $_.Download.Status -eq 'Failed' }).Count
     Write-WPLog ("Backup finished in {0:mm\:ss}. Report: {1}" -f $elapsed, "$dest\AppInventory.html") 'ok'
-    return @{ Cancelled = $false; Failed = $failed; Report = "$dest\AppInventory.html"; Destination = $dest; Added = $added; Removed = $removed }
+    return @{ Cancelled = $false; Failed = $failed; Report = "$dest\AppInventory.html"; Destination = $dest; Added = $added; Removed = $removed; Readiness = $ready }
 }
 
 #endregion
@@ -2276,6 +2543,7 @@ function Find-WPBackups {
     }
     foreach ($kf in @('Desktop', 'MyDocuments')) { $roots.Add([Environment]::GetFolderPath($kf)) }
     $roots.Add((Get-WPDownloadsFolder))
+    foreach ($s in @(Get-WPSyncFolders)) { $roots.Add([string]$s.Path) }
     $seen = @{}
     $found = @()
     foreach ($r in $roots) {
@@ -2419,7 +2687,8 @@ function Invoke-WPRestore {
     $doneDeps = @{}
     $order = @{ runtimes = 0; drivers = 1; launchers = 2; apps = 3; store = 4; bundled = 5; games = 6; system = 7 }
     $list = @($Entries | Sort-Object { $order[[string]$_.Category] }, Name)
-    $stats = @{ ok = 0; failed = 0; manual = 0; skipped = 0; finished = 0; total = $list.Count; restart = $false }
+    $stats = @{ ok = 0; failed = 0; manual = 0; skipped = 0; finished = 0; total = $list.Count; restart = $false; unverified = 0 }
+    $results = @{}; $cfgResults = @()
 
     $finish = {
         param($e, $r)
@@ -2429,6 +2698,7 @@ function Invoke-WPRestore {
         elseif ($r.Manual) { $stats.manual++; $lvl = 'warn'; $mk = 'manual' }
         else { $stats.failed++; $lvl = 'error'; $mk = 'failed' }
         if ([string]$r.Detail -like '*restart needed*') { $stats.restart = $true }
+        $results[[string]$e.Key] = @{ Mk = $mk; Detail = [string]$r.Detail }
         Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = $r.Detail; Level = $lvl }
         Write-WPLog ("{0}: {1}" -f $e.Name, $r.Detail) $lvl
         Set-WPProgress $stats.finished $stats.total ("Installed {0} of {1}" -f $stats.finished, $stats.total)
@@ -2522,6 +2792,30 @@ function Invoke-WPRestore {
         }
     }
 
+    # An installer exiting cleanly isn't proof: check Windows actually lists each app now.
+    $appResults = @()
+    if (-not $test -and -not (Test-WPCancel) -and $list.Count) {
+        Write-WPLog 'Checking which apps Windows now lists as installed...' 'step'
+        $after = $null
+        try { $after = Get-WPInstalledIndexFull } catch { }
+        foreach ($e in $list) {
+            $r = $results[[string]$e.Key]
+            if (-not $r) { continue }
+            $outcome = switch ($r.Mk) { 'skipped' { 'present' } 'manual' { 'manual' } 'failed' { 'failed' } default { 'installed' } }
+            $detail = $r.Detail
+            if ($outcome -eq 'installed' -and $after -and -not (Test-WPInstalledFull $e $after)) {
+                $outcome = 'unverified'; $detail = "Installer finished, but Windows doesn't list the app"
+                $stats.ok--; $stats.unverified++
+                Send-WPMessage 'restoreItem' @{ Key = $e.Key; Status = $detail; Level = 'warn' }
+                Write-WPLog ("{0}: {1}" -f $e.Name, $detail) 'warn'
+                if ($progress) { $progress.done[[string]$e.Key] = 'failed'; Save-WPRestoreProgress $progress }
+            }
+            $link = ''
+            if (@('manual', 'failed', 'unverified') -contains $outcome) { $l = @(Get-WPEntryLinks $e) | Select-Object -First 1; if ($l) { $link = [string]$l.Url } }
+            $appResults += [pscustomobject]@{ Name = [string]$e.Name; Outcome = $outcome; Detail = $detail; Link = $link }
+        }
+    }
+
     if (-not (Test-WPCancel) -and @($Configs).Count) {
         Write-WPLog 'Putting app settings back...' 'step'
         foreach ($c in @($Configs)) {
@@ -2542,15 +2836,20 @@ function Invoke-WPRestore {
                 else { $out = & $script -TestRun:$test *>&1 | ForEach-Object { "$_" } }
                 $last = @($out | Where-Object { $_.Trim() }) | Select-Object -Last 1
                 # Restore-Config.ps1 ends with "Check <app>: ..." when its own verification found files that didn't land.
-                $level = $(if ($last -and $last.Trim().StartsWith('Check ')) { 'warn' } else { 'ok' })
-                Send-WPMessage 'restoreItem' @{ Key = $key; Status = $(if ($last) { $last.Trim() } else { 'Restored' }); Level = $level }
+                $lastText = $(if ($last) { $last.Trim() } else { 'Restored' })
+                # Restore-Config.ps1 ends with "Check <app>: ..." when files didn't land, "Already in place" when nothing needed changing.
+                $level = $(if ($lastText.StartsWith('Check ')) { 'warn' } elseif ($lastText.StartsWith('Already in place')) { 'info' } else { 'ok' })
+                Send-WPMessage 'restoreItem' @{ Key = $key; Status = $lastText; Level = $level }
                 foreach ($line in $out) { if ($line.Trim()) { Write-WPLog ("  " + $line.Trim()) 'info' } }
                 if ($level -eq 'warn') { Write-WPLog ("{0} settings restored, but some files need a look (see above)" -f $c.Name) 'warn' }
+                elseif ($level -eq 'info') { Write-WPLog ("{0} settings were already in place" -f $c.Name) 'ok' }
                 else { Write-WPLog ("{0} settings restored" -f $c.Name) 'ok' }
-                if ($progress) { $progress.done[$key] = 'ok'; Save-WPRestoreProgress $progress }
+                $cfgResults += [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = @{ warn = 'warn'; info = 'present'; ok = 'ok' }[$level]; Detail = $lastText }
+                if ($progress) { $progress.done[$key] = $(if ($level -eq 'info') { 'skipped' } else { 'ok' }); Save-WPRestoreProgress $progress }
             } catch {
                 Send-WPMessage 'restoreItem' @{ Key = $key; Status = $_.Exception.Message; Level = 'error' }
                 Write-WPLog ("{0} settings: {1}" -f $c.Name, $_.Exception.Message) 'error'
+                $cfgResults += [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = 'failed'; Detail = $_.Exception.Message }
                 if ($progress) { $progress.done[$key] = 'failed'; Save-WPRestoreProgress $progress }
             }
         }
@@ -2571,9 +2870,16 @@ function Invoke-WPRestore {
 
     $cancelled = Test-WPCancel
     if ($progress -and -not $cancelled) { Clear-WPRestoreProgress }
-    Write-WPLog ("Done: {0} installed, {1} already there, {2} manual, {3} failed." -f $stats.ok, $stats.skipped, $stats.manual, $stats.failed) 'ok'
-    if ($stats.failed -or $stats.manual) { Write-WPLog 'Use "Manual links" for the rest, then restart the PC.' 'info' }
-    return @{ Ok = $stats.ok; Failed = $stats.failed; Manual = $stats.manual; Skipped = $stats.skipped; Complete = (-not $cancelled); RestartNeeded = $stats.restart }
+    $report = ''
+    if (-not $test -and -not $cancelled) {
+        $report = Join-Path $script:WP.StateDir 'Restore check.html'
+        try { Export-WPRestoreReport @{ Apps = $appResults; Configs = $cfgResults } $report $Options.Computer } catch { $report = '' }
+    }
+    $cfgOk = @($cfgResults | Where-Object { @('ok', 'present') -contains $_.Outcome }).Count
+    $cfgBad = @($cfgResults | Where-Object { @('warn', 'failed') -contains $_.Outcome }).Count
+    Write-WPLog ("Done: {0} installed and found, {1} already there, {2} need manual action, {3} failed or not found. Settings: {4} in place, {5} need a look." -f $stats.ok, $stats.skipped, $stats.manual, ($stats.failed + $stats.unverified), $cfgOk, $cfgBad) 'ok'
+    if ($stats.failed -or $stats.manual -or $stats.unverified) { Write-WPLog 'Use "Open manual links" for the rest, then restart the PC.' 'info' }
+    return @{ Ok = $stats.ok; Failed = $stats.failed; Manual = $stats.manual; Skipped = $stats.skipped; Unverified = $stats.unverified; Complete = (-not $cancelled); RestartNeeded = $stats.restart; ConfigsOk = $cfgOk; ConfigsBad = $cfgBad; Report = $report; Apps = $appResults; Configs = $cfgResults }
 }
 
 #endregion

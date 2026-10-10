@@ -687,7 +687,9 @@
               <Button x:Name="BtnLinks" Style="{StaticResource BtnGhost}">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Look up download links"/></StackPanel>
               </Button>
-              <TextBlock Text="SELECT" Style="{StaticResource SideLabel}"/>
+              <Button x:Name="BtnExportList" Style="{StaticResource BtnGhost}" ToolTip="Saves the ticked apps (names and where they install from, nothing personal) for setting up another PC.">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72D;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Export app list..."/></StackPanel>
+              </Button>              <TextBlock Text="SELECT" Style="{StaticResource SideLabel}"/>
               <Button x:Name="BtnSelRecommended" Style="{StaticResource BtnGhost}">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE735;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Recommended"/></StackPanel>
               </Button>
@@ -782,7 +784,7 @@
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="Where to save the backup" FontSize="15" FontWeight="SemiBold"/>
-                <TextBlock Text="Pick a folder on your NAS (or any drive the reset won't wipe). Running the backup again updates it in place."
+                <TextBlock Text="Pick a folder the reset won't wipe: your NAS, a USB or second drive, or a OneDrive, Google Drive or Dropbox folder. Running the backup again updates it in place."
                            Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,12"/>
                 <DockPanel>
                   <Button x:Name="BtnBrowseDest" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="8,0,0,0" Padding="14,8">
@@ -832,6 +834,31 @@
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Open report"/></StackPanel>
                   </Button>
                 </StackPanel>
+              </StackPanel>
+            </Border>
+            <Border x:Name="ReadyCard" Style="{StaticResource Card}" Visibility="Collapsed">
+              <StackPanel>
+                <TextBlock x:Name="ReadyTitle" Text="Ready to reset" FontSize="15" FontWeight="SemiBold"/>
+                <TextBlock x:Name="ReadySub" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,12"/>
+                <WrapPanel x:Name="ReadyStats"/>
+                <TextBlock x:Name="ReadyProblems" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource Warn}" Visibility="Collapsed"/>
+                <Border x:Name="SyncBox" Background="{StaticResource Panel2}" CornerRadius="10" Padding="14,11" Margin="0,10,0,0" Visibility="Collapsed">
+                  <StackPanel>
+                    <TextBlock x:Name="SyncTitle" FontWeight="SemiBold" Foreground="{StaticResource Warn}"/>
+                    <TextBlock x:Name="SyncText" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,4,0,0"/>
+                  </StackPanel>
+                </Border>
+                <WrapPanel Margin="0,12,0,0">
+                  <Button x:Name="BtnReadyReport" Style="{StaticResource Btn}" Margin="0,0,8,6" Padding="14,9">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Open readiness report"/></StackPanel>
+                  </Button>
+                  <Button x:Name="BtnSyncWeb" Style="{StaticResource Btn}" Margin="0,0,8,6" Padding="14,9" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock x:Name="BtnSyncWebText" Text="Check on the web"/></StackPanel>
+                  </Button>
+                  <Button x:Name="BtnSyncConfirm" Style="{StaticResource Btn}" Margin="0,0,8,6" Padding="14,9" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE73E;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="I've checked it's online"/></StackPanel>
+                  </Button>
+                </WrapPanel>
               </StackPanel>
             </Border>
             <ListBox x:Name="BackupLog" Style="{StaticResource LogList}" Height="280"/>

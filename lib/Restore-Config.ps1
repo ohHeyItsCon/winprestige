@@ -12,11 +12,14 @@
 
   Install the app first, then run this (or Restore-Config.cmd next to it).
   Use -TestRun to see what would happen without changing anything.
+  Running it again is safe: if every file is already in place it changes nothing (-Force
+  restores anyway). Before replacing anything it saves what was there, and -Revert puts
+  that back.
   WinPrestige itself runs its own (newest) copy with -Folder pointing at the backup's
   config folder, so older backups get the latest fixes.
 #>
 [CmdletBinding()]
-param([switch]$TestRun, [switch]$Pause, [string]$Folder)
+param([switch]$TestRun, [switch]$Pause, [string]$Folder, [switch]$Revert, [switch]$Force)
 
 $ErrorActionPreference = 'Stop'
 trap {
@@ -132,6 +135,61 @@ function Test-Landed {
     return $result
 }
 
+$undoRoot = Join-Path $env:LOCALAPPDATA ('WinPrestige\undo\' + ($spec.id -replace '[^\w.-]', '_'))
+
+function Get-RegPath([string]$Key) { return 'Registry::' + ($Key -replace '^HKCU\\', 'HKEY_CURRENT_USER\' -replace '^HKLM\\', 'HKEY_LOCAL_MACHINE\') }
+
+function Invoke-Reg([string[]]$Arguments) {
+    # reg.exe prints its success message on stderr, which 'Stop' would turn into an error.
+    $ErrorActionPreference = 'Continue'
+    $null = & reg.exe @Arguments 2>&1
+    return $LASTEXITCODE
+}
+
+function Test-Differs([string]$A, [string]$B) {
+    $x = New-Object IO.FileInfo $A; $y = New-Object IO.FileInfo $B
+    return ($x.Length -ne $y.Length -or [Math]::Abs(($x.LastWriteTimeUtc - $y.LastWriteTimeUtc).TotalSeconds) -gt 2)
+}
+
+function Save-UndoSnapshot([object[]]$Pairs, [object[]]$Regs) {
+    # Keeps a copy of everything the restore is about to replace, so -Revert can put it back.
+    $snap = Join-Path $undoRoot (Get-Date -Format 'yyyyMMdd-HHmmss')
+    New-Item -ItemType Directory -Path $snap -Force | Out-Null
+    $saved = @(); $created = @(); $keys = @(); $n = 0
+    foreach ($p in $Pairs) {
+        $list = @()
+        if ($p.Type -eq 'file') { $list = , @($p.Source, $p.Target) }
+        else {
+            $base = (Get-Item -LiteralPath $p.Source).FullName.TrimEnd('\')
+            foreach ($s in [IO.Directory]::EnumerateFiles($base, '*', [IO.SearchOption]::AllDirectories)) { $list += , @($s, [IO.Path]::Combine($p.Target, $s.Substring($base.Length + 1))) }
+        }
+        foreach ($pair in $list) {
+            try {
+                if (Test-Path -LiteralPath $pair[1] -PathType Leaf) {
+                    if (-not (Test-Differs $pair[0] $pair[1])) { continue }
+                    $n++
+                    $stored = "files\$n" + [IO.Path]::GetExtension($pair[1])
+                    [IO.File]::Copy($pair[1], (Join-Path $snap $stored.Replace('files\', 'files_')), $true)
+                    $saved += [ordered]@{ Target = $pair[1]; Stored = $stored.Replace('files\', 'files_') }
+                } else { $created += $pair[1] }
+            } catch { }
+        }
+    }
+    $i = 0
+    foreach ($reg in $Regs) {
+        $i++
+        if (Test-Path -LiteralPath (Get-RegPath $reg.key)) {
+            $file = "registry_$i.reg"
+            if ((Invoke-Reg @('export', $reg.key, (Join-Path $snap $file), '/y')) -eq 0) { $keys += [ordered]@{ Key = $reg.key; Stored = $file } }
+        } else { $keys += [ordered]@{ Key = $reg.key; Stored = '' } }
+    }
+    $doc = [ordered]@{ id = $spec.id; name = $spec.name; created = (Get-Date).ToString('s'); saved = $saved; created_files = $created; registry = $keys }
+    [IO.File]::WriteAllText((Join-Path $snap 'undo.json'), ($doc | ConvertTo-Json -Depth 5), (New-Object Text.UTF8Encoding $false))
+    # Keep the last three snapshots per app.
+    @(Get-ChildItem -LiteralPath $undoRoot -Directory | Sort-Object Name -Descending | Select-Object -Skip 3) | ForEach-Object { [IO.Directory]::Delete($_.FullName, $true) }
+    return @{ Saved = $saved.Count; Created = $created.Count }
+}
+
 $runningServices = @(foreach ($s in @($spec.services)) {
         if (-not $s) { continue }
         $svc = Get-Service -Name $s -ErrorAction SilentlyContinue
@@ -148,18 +206,40 @@ if ($needsAdmin -and -not $isAdmin -and -not $TestRun) {
     $tmp = Join-Path $env:TEMP ('WinPrestige-restore-' + ($spec.id -replace '[^\w.-]', '_'))
     & robocopy.exe $here $tmp /E /R:1 /W:1 /NP /NFL /NDL /NJH /NJS | Out-Null
     Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $tmp 'Restore-Config.ps1') -Force
-    Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tmp\Restore-Config.ps1`" -Pause"
+    $extra = ''; if ($Revert) { $extra += ' -Revert' }; if ($Force) { $extra += ' -Force' }
+    Start-Process -FilePath 'powershell.exe' -Verb RunAs -Wait -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$tmp\Restore-Config.ps1`" -Pause$extra"
     Write-Host 'Finished. The result was shown in the administrator window.'
     return
 }
 
-Write-Host "Restoring $($spec.name) settings"
+Write-Host "$(if ($Revert) { 'Reverting' } else { 'Restoring' }) $($spec.name) settings"
 
 $needsInstallDir = @($spec.items | Where-Object { $_.target -like '*%INSTALLDIR%*' }).Count -gt 0
 $installDir = $null
 if ($needsInstallDir) {
     $installDir = Find-InstallDir
     if (-not $installDir) { throw "Couldn't find where $($spec.name) is installed. Install it first, then run this again." }
+}
+
+if ($Revert) {
+    $latest = @(Get-ChildItem -LiteralPath $undoRoot -Directory -ErrorAction SilentlyContinue | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'undo.json') } | Sort-Object Name -Descending) | Select-Object -First 1
+    if (-not $latest) { throw "Nothing to revert for $($spec.name): no earlier settings were saved on this PC." }
+} elseif (-not $TestRun -and -not $Force) {
+    # Safe to run again: if everything already matches the backup, change nothing.
+    $same = $true; $count = 0
+    foreach ($item in @($spec.items)) {
+        $src = Join-Path $here $item.stored
+        if (-not (Test-Path -LiteralPath $src)) { continue }
+        $r = Test-Landed $src (Expand-Target $item.target $installDir) $item.type
+        $count += $r.Files
+        if ($r.Bad.Count) { $same = $false; break }
+    }
+    foreach ($reg in @($spec.registry | Where-Object { $_ })) { if (-not (Test-Path -LiteralPath (Get-RegPath $reg.key))) { $same = $false } }
+    if ($same -and ($count -or @($spec.registry | Where-Object { $_ }).Count)) {
+        Write-Host ("Already in place: {0} for {1} match the backup. Nothing changed." -f $(if ($count) { Format-Count $count 'file' } else { 'registry keys' }), $spec.name)
+        if ($Pause) { [void](Read-Host 'Press Enter to close') }
+        return
+    }
 }
 
 # Pause background services first so they can't relaunch the app or write over the files mid-copy.
@@ -185,6 +265,31 @@ try {
         if ($TestRun) { Write-Host "  would close $name"; continue }
         $procs | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Milliseconds 800
+    }
+
+    if ($Revert) {
+        $u = Get-Content -LiteralPath (Join-Path $latest.FullName 'undo.json') -Raw | ConvertFrom-Json
+        $back = 0; $removed = 0
+        foreach ($s in @($u.saved)) {
+            $parent = Split-Path -Parent $s.Target
+            if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+            [IO.File]::Copy((Join-Path $latest.FullName $s.Stored), $s.Target, $true); $back++
+        }
+        foreach ($c in @($u.created_files)) { if ($c -and (Test-Path -LiteralPath $c -PathType Leaf)) { [IO.File]::Delete($c); $removed++ } }
+        foreach ($k in @($u.registry)) {
+            if ($k.Stored) { [void](Invoke-Reg @('import', (Join-Path $latest.FullName $k.Stored))) }
+            elseif (Test-Path -LiteralPath (Get-RegPath $k.Key)) { [void](Invoke-Reg @('delete', $k.Key, '/f')) }
+        }
+        [IO.Directory]::Delete($latest.FullName, $true)
+        $summary = "Reverted $($spec.name) to how it was before the restore: $(Format-Count $back 'file') put back, $(Format-Count $removed 'file') removed."
+    } else {
+    if (-not $TestRun) {
+        $plan = @(foreach ($item in @($spec.items)) {
+                $src = Join-Path $here $item.stored
+                if (Test-Path -LiteralPath $src) { @{ Source = $src; Target = (Expand-Target $item.target $installDir); Type = $item.type } }
+            })
+        $snap = Save-UndoSnapshot $plan @($spec.registry | Where-Object { $_ })
+        if ($snap.Saved -or $snap.Created) { Write-Host ("  saved the current settings first ({0} replaced, {1} new) so you can revert" -f $snap.Saved, $snap.Created) }
     }
 
     $copied = @()
@@ -214,6 +319,7 @@ try {
         $null = & reg.exe import $file 2>&1
         $code = $LASTEXITCODE
         $ErrorActionPreference = 'Stop'
+        if ($code -eq 0 -and -not (Test-Path -LiteralPath (Get-RegPath $reg.key))) { $code = 1 }
         if ($code -ne 0) { Write-Warning "Could not import $($reg.key)." }
     }
 
@@ -280,6 +386,7 @@ try {
                 }
             }
         }
+    }
     }
 } finally {
     foreach ($svc in $stopped) {

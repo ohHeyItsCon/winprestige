@@ -52,7 +52,16 @@ Requirements: Windows 10 or 11. winget (App Installer) is used when available; w
 1. **Apps:** the scan runs on its own. Click an app to see where its installer comes from. Apps tagged `manual` had no winget or Store package: pick one of the suggested matches or paste a direct download link.
 2. **App settings:** tick what to keep. Very large folders, like modpack instances and browser profiles, start unticked.
 3. **Extras:** turn on fonts, Wi-Fi, drivers or user folders as needed.
-4. **Backup:** choose a folder the reset won't wipe (a NAS share works well), then press **Start backup**.
+4. **Backup:** choose a folder the reset won't wipe: a NAS share, a USB or second drive, or a OneDrive, Google Drive or Dropbox folder. Then press **Start backup**.
+5. **Ready to reset:** when the backup finishes, a summary shows how every ticked app will come back (saved installer, online install, or manual action), which app settings and extras are included, and any problems, such as an installer file that's missing. The same check is saved in the backup as `Ready to reset.html`.
+
+### Backing up to OneDrive, Google Drive or Dropbox
+
+WinPrestige recognises your OneDrive, Google Drive for desktop and Dropbox folders and offers them as destinations. It treats them as ordinary folders on this PC: it doesn't sign in to the service or upload anything itself. Your sync app does the uploading in the background.
+
+That means a finished backup only proves the copy on this PC. Before you reset, open the service on the web (or on another device) and check the `WinPrestige Backup` folder is there and has finished syncing, then press **I've checked it's online**. WinPrestige can't see the upload status for you.
+
+After the reset, sign in to the sync app again (OneDrive is built into Windows; install Google Drive for desktop or Dropbox), make the `WinPrestige Backup` folder available offline and let it download, then run `Restore.cmd` in it or pick it in WinPrestige. Keep enough cloud storage free for the backup; installers can take several gigabytes.
 
 ## After the reset
 
@@ -74,6 +83,20 @@ If an installer clashes with another one running at the same time, it gets retri
 If the PC restarts in the middle, WinPrestige opens again after you sign in and offers to **Continue restore** with whatever's left.
 
 If the admin window can't reach a network share, WinPrestige offers to sign in to it for you.
+
+### Checking the result
+
+When the restore finishes, WinPrestige checks what Windows actually lists as installed. An installer that exits without an error isn't enough: apps that Windows doesn't list afterwards are reported as **not found**. The summary shows apps installed and found, already installed, needing manual action, and failed or not found, plus app settings in place or needing a look. The full list, with download links for anything left to do, is in the restore report (**Open report**).
+
+### Running it again, and undoing settings
+
+A restore can be run again safely. Apps that are already installed are skipped, and app settings whose files already match the backup are left alone ("Already in place").
+
+Before WinPrestige replaces an app's settings, it saves the files and registry keys it's about to overwrite (in `%LOCALAPPDATA%\WinPrestige\undo`, the last three times per app). Click **Revert** next to an app's settings on the Restore screen to put back what was there before. Files the restore added are removed; files it didn't touch stay as they are. From a command line, `Restore-Config.ps1 -Revert` does the same.
+
+## Setting up another PC
+
+**Export app list...** on the Apps screen saves the ticked apps as a small file: names and where each one installs from (winget, the Microsoft Store, or its download page). It has no settings, passwords, file paths, versions, personal download links or installers. On the other PC, drag the file onto WinPrestige (or paste its path on the Restore screen), and the apps install online.
 
 ## Trying a restore first
 
