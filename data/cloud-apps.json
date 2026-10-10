@@ -1,0 +1,16 @@
+{
+  "_readme": "App registrations for cloud sign-in. These IDs identify WinPrestige to each provider; they are public, not secrets. Google's 'client secret' for desktop apps is not confidential either (Google documents this). See docs/CLOUD-SETUP.md. A copy at %LOCALAPPDATA%\\WinPrestige\\cloud-apps.json overrides this file.",
+  "onedrive": {
+    "clientId": "",
+    "redirect": "http://localhost"
+  },
+  "googledrive": {
+    "clientId": "",
+    "clientSecret": "",
+    "redirect": "http://127.0.0.1"
+  },
+  "dropbox": {
+    "appKey": "",
+    "redirect": "http://127.0.0.1:47615/"
+  }
+}

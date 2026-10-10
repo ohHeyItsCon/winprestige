@@ -133,13 +133,15 @@ $SettingsPath = Join-Path $script:WP.StateDir 'settings.json'
 $FirstRun = $Demo -or -not (Test-Path -LiteralPath $SettingsPath)
 
 function Get-WPSettings {
-    $s = @{ Destination = ''; Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{}; RecentBackups = @() }
+    $s = @{ Destination = ''; DestKind = ''; CloudAccounts = @{}; SyncConfirmed = @(); Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{}; RecentBackups = @() }
     if ($Demo) { return $s }
     $raw = $null
     try { $raw = Read-WPJson $SettingsPath } catch { }
     if ($raw) {
         if ($raw.Destination) { $s.Destination = [string]$raw.Destination }
-        foreach ($k in @('Selections', 'Chosen', 'CustomUrls', 'ConfigSelections', 'ExtraSelections')) {
+        if ($raw.DestKind) { $s.DestKind = [string]$raw.DestKind }
+        if ($raw.SyncConfirmed) { $s.SyncConfirmed = @(foreach ($c in $raw.SyncConfirmed) { $c }) }
+        foreach ($k in @('Selections', 'Chosen', 'CustomUrls', 'ConfigSelections', 'ExtraSelections', 'CloudAccounts')) {
             if ($raw.$k) { $s[$k] = ConvertTo-WPHashtable $raw.$k }
         }
         if ($raw.CustomConfigs) { $s.CustomConfigs = @(foreach ($c in $raw.CustomConfigs) { $c }) }
@@ -187,6 +189,7 @@ $state = @{
     Restore = $null; RestoreRoot = ''; RRows = @{}; RestoreSel = @{}
     Dirty = @{}; LastReport = ''; GroupChecks = @{}; LastBackupTab = 'TabApps'; SummaryLast = @{}; WasBusy = $false
     FoundBackups = @(); BannerKind = ''; BannerBackup = $null; BannerProgress = $null
+    DemoCloud = @{}; CloudBusyPanel = $null; ReadyCloud = $null
     LogFile = Join-Path $script:WP.StateDir ("winprestige-{0}.log" -f (Get-Date -Format 'yyyy-MM-dd'))
 }
 
@@ -630,6 +633,10 @@ function Invoke-WPMessage {
             if ($Animate) { $ui.Progress.BeginAnimation([Windows.Controls.Primitives.RangeBase]::ValueProperty, (New-WPDoubleAnimation $val 300)) }
             else { $ui.Progress.Value = $val }
             if ($m.Text) { Set-WPStatus $m.Text }
+            if ($script:RestoreDlg -and $script:RestoreDlg.RcProgress.Visibility -eq 'Visible') {
+                $script:RestoreDlg.RcProgress.Value = 100 * $val / $max
+                if ($m.Text) { $script:RestoreDlg.RcStatus.Text = $m.Text }
+            }
         }
         'app' {
             $a = $state.AppIndex[$m.Key]
@@ -1537,8 +1544,11 @@ function Get-WPSuggestedDestination {
 }
 
 function Set-WPDestChips {
+    # Quick picks under the path box: drives and shares for "folder", sync-app folders for "synced".
+    param([string]$Kind = 'folder')
     $ui.DestChips.Children.Clear()
     $chips = @()
+    if ($Kind -ne 'synced') {
     foreach ($d in @(Get-WPNetworkDrives)) {
         $leaf = @($d.Unc.TrimEnd('\') -split '\\' | Where-Object { $_ })[-1]
         $chips += @{ Text = "$($d.Letter):  $leaf"; Path = $d.Unc.TrimEnd('\') + '\WinPrestige Backup'; Tip = $d.Unc }
@@ -1548,9 +1558,13 @@ function Set-WPDestChips {
         if ($d.DeviceID -eq $env:SystemDrive) { continue }
         $chips += @{ Text = "$($d.DeviceID)  $($d.VolumeName)".Trim(); Path = "$($d.DeviceID)\WinPrestige Backup"; Tip = 'Local drive (survives a reset only if you don''t wipe all drives)' }
     }
+    }
     $syncs = if ($Demo) { @([pscustomobject]@{ Provider = 'OneDrive'; Label = 'OneDrive'; Path = "$script:WPDemoUser\OneDrive" }) } else { @(Get-WPSyncFolders) }
     foreach ($s in $syncs) {
         $chips += @{ Text = "$($s.Label)  (synced folder)"; Path = $s.Path + '\WinPrestige Backup'; Tip = "A folder $($s.Provider) keeps in sync. WinPrestige writes the backup here on this PC and $($s.Provider) uploads it; check it's online before you reset." }
+    }
+    if ($Kind -eq 'synced' -and -not $syncs.Count) {
+        $ui.DestInfo.Text = 'No sync-app folders found on this PC. Type or browse to the folder, or pick a cloud account in the list above to sign in directly.'
     }
     foreach ($c in $chips) {
         $b = New-Object Windows.Controls.Button
@@ -1587,6 +1601,8 @@ function Get-WPFreeSpace {
 
 function Update-WPDestInfo {
     param([switch]$CheckExisting)
+    if ($script:BackupCloud -and (Test-WPCloudKind (Get-WPDestKind))) { Update-WPCloudDestInfo -CheckExisting:$CheckExisting; return }
+    $ui.DestInfo.Visibility = 'Visible'
     $p = $ui.DestBox.Text.Trim().Trim('"')
     $color = $Palette.Muted
     $msgs = @()
@@ -1716,13 +1732,15 @@ function Get-WPSyncConfirmed {
 
 function Show-WPReadiness {
     # The "Ready to reset" card: how every ticked app comes back, checked against the backup's files.
-    param($Ready)
+    param($Ready, $Cloud)
     if (-not $Ready) { $ui.ReadyCard.Visibility = 'Collapsed'; return }
     $state.Readiness = $Ready
+    $state.ReadyCloud = $Cloud
     $c = $Ready.Counts
     $probs = @($Ready.Problems)
-    $ui.ReadyTitle.Text = $(if ($probs.Count) { 'Almost ready to reset' } else { 'Ready to reset' })
-    $ui.ReadySub.Text = 'Checked against the files in the backup folder. The readiness report lists every app and how it comes back.'
+    $cloudBad = $Cloud -and -not $Cloud.Verified
+    $ui.ReadyTitle.Text = $(if ($probs.Count -or $cloudBad) { 'Almost ready to reset' } else { 'Ready to reset' })
+    $ui.ReadySub.Text = $(if ($Cloud) { "Checked against the backup on this PC and the copy on $($Cloud.Provider). The readiness report lists every app and how it comes back." } else { 'Checked against the files in the backup folder. The readiness report lists every app and how it comes back.' })
     $ui.ReadyStats.Children.Clear()
     foreach ($tile in @(
             @($c.saved, 'saved installers', $Palette.Good),
@@ -1738,7 +1756,24 @@ function Show-WPReadiness {
         if ($probs.Count -gt 3) { $ui.ReadyProblems.Text += "   and $($probs.Count - 3) more (see the report)" }
         $ui.ReadyProblems.Visibility = 'Visible'
     } else { $ui.ReadyProblems.Visibility = 'Collapsed' }
-    if ($Ready.Sync) {
+    if ($Cloud) {
+        if ($Cloud.Verified) {
+            $ui.SyncTitle.Text = "Uploaded and verified on $($Cloud.Provider)"
+            $ui.SyncTitle.Foreground = Get-WPBrush $Palette.Good
+            $how = $(if ([int]$Cloud.SizeOnly -and -not [int]$Cloud.HashChecked) { "compared every file's size (this server reports no checksums; the checksum list saved with the backup lets a restore check each file)" } else { "checked every file's size and checksum" })
+            $ui.SyncText.Text = ("All {0:N0} files ({1}) are in {2}, and WinPrestige {3} against the copy on this PC." -f [int]$Cloud.Files, (Format-WPSize $Cloud.Bytes), $Cloud.Where, $how) + "`n" +
+                "After the reset: get WinPrestige from GitHub (or run it from a USB stick), open Restore > Load from a cloud account and sign in to $($Cloud.Provider). This backup is in the list."
+        } else {
+            $n = @($Cloud.Problems).Count
+            $ui.SyncTitle.Text = $(if ($n -eq 1) { "1 file didn't upload correctly to $($Cloud.Provider)" } else { "$n files didn't upload correctly to $($Cloud.Provider)" })
+            $ui.SyncTitle.Foreground = Get-WPBrush $Palette.Bad
+            $ui.SyncText.Text = ((@($Cloud.Problems) | Select-Object -First 3) -join "`n") + "`nRun the backup again: only what's missing or different is sent. Don't reset until this says verified."
+        }
+        $ui.BtnSyncWebText.Text = "Open $($Cloud.Provider) on the web"
+        $ui.BtnSyncWeb.Visibility = $(if ($Cloud.Web) { 'Visible' } else { 'Collapsed' })
+        $ui.BtnSyncConfirm.Visibility = 'Collapsed'
+        $ui.SyncBox.Visibility = 'Visible'
+    } elseif ($Ready.Sync) {
         $adv = Get-WPSyncAdvice $Ready.Sync
         $when = Get-WPSyncConfirmed $Ready.Root
         if ($when) {
@@ -1825,33 +1860,52 @@ function Invoke-WPRevert {
 }
 
 function Start-WPBackup {
+    $kind = Get-WPDestKind
+    $cloudAcct = $null
+    if (Test-WPCloudKind $kind) {
+        $cloudAcct = Get-WPCloudPanelAccount $script:BackupCloud
+        if (-not $cloudAcct) {
+            [void][System.Windows.MessageBox]::Show($window, "Connect to $((Get-WPCloudProvider $kind).Name) first, with the button under the destination list.", 'WinPrestige')
+            return
+        }
+    }
     $dest = $ui.DestBox.Text.Trim().Trim('"')
-    if (-not $dest) { [void][System.Windows.MessageBox]::Show($window, 'Choose where to save the backup first.', 'WinPrestige'); $ui.DestBox.Focus(); return }
+    if (-not $cloudAcct -and -not $dest) { [void][System.Windows.MessageBox]::Show($window, 'Choose where to save the backup first.', 'WinPrestige'); $ui.DestBox.Focus(); return }
     if ($Demo) {
         $ui.BackupLog.Items.Clear()
         $state.LogTarget = $ui.BackupLog
+        if ($cloudAcct) { $dest = "$script:WPDemoUser\AppData\Local\WinPrestige\Cloud\WinPrestige Backup" }
         $demoOpts = @{ Installers = $true; Configs = [bool]$ui.OptConfigs.IsChecked; Extras = [bool]$ui.OptExtras.IsChecked; Prune = [bool]$ui.OptPrune.IsChecked }
         Start-WPJob 'Backup' {
-            Invoke-WPDemoBackup $P.Apps $P.Configs $P.Extras $P.Destination $P.Options
-        } @{ Apps = @($state.Apps); Configs = @($state.Configs); Extras = @($state.Extras); Destination = $dest; Options = $demoOpts } {
+            $r = Invoke-WPDemoBackup $P.Apps $P.Configs $P.Extras $P.Destination $P.Options
+            if ($P.Cloud -and $r -and -not $r.Cancelled) { $r.Cloud = Invoke-WPDemoCloudUpload (Get-WPDemoCloudAccount $P.Cloud) }
+            $r
+        } @{ Apps = @($state.Apps); Configs = @($state.Configs); Extras = @($state.Extras); Destination = $dest; Options = $demoOpts; Cloud = $(if ($cloudAcct) { $cloudAcct.Provider } else { '' }) } {
             param($r, $err)
             if ($r -and $r.Report) {
                 $state.LastReport = [string]$r.Report
-                Set-WPStatus 'Backup saved. 1 download failed; the restore installs it with winget online.'
-                if ($r.Readiness) { Show-WPReadiness $r.Readiness; $state.LastReadyReport = [string]$r.ReadyReport }
+                if ($r.Cloud) { Set-WPStatus "Backup uploaded and verified on $($r.Cloud.Provider). 1 download failed; the restore installs it with winget online." }
+                else { Set-WPStatus 'Backup saved. 1 download failed; the restore installs it with winget online.' }
+                if ($r.Readiness) { Show-WPReadiness $r.Readiness $r.Cloud; $state.LastReadyReport = [string]$r.ReadyReport }
             }
             foreach ($a in $state.Apps) { Update-WPAppRow $a }
         }
         return
     }
-    $dest = ConvertTo-WPUncPath $dest
-    $ui.DestBox.Text = $dest
-    $root = [IO.Path]::GetPathRoot($dest)
-    if ($root -and $root.TrimEnd('\') -ieq $env:SystemDrive -and -not (Get-WPSyncProvider $dest)) {
-        $ans = [System.Windows.MessageBox]::Show($window, "This folder is on $($env:SystemDrive), which the reset will wipe. Back up there anyway?", 'WinPrestige', 'YesNo', 'Warning')
-        if ($ans -ne 'Yes') { return }
+    $remoteDir = ''
+    if ($cloudAcct) {
+        $dest = Get-WPCloudStaging $cloudAcct
+        $remoteDir = Get-WPCloudRemoteDir $cloudAcct
+    } else {
+        $dest = ConvertTo-WPUncPath $dest
+        $ui.DestBox.Text = $dest
+        $root = [IO.Path]::GetPathRoot($dest)
+        if ($root -and $root.TrimEnd('\') -ieq $env:SystemDrive -and -not (Get-WPSyncProvider $dest)) {
+            $ans = [System.Windows.MessageBox]::Show($window, "This folder is on $($env:SystemDrive), which the reset will wipe. Back up there anyway?", 'WinPrestige', 'YesNo', 'Warning')
+            if ($ans -ne 'Yes') { return }
+        }
+        if (-not (Confirm-WPReachable $dest)) { return }
     }
-    if (-not (Confirm-WPReachable $dest)) { return }
     if ($ui.OptCloseApps.IsChecked -and $ui.OptConfigs.IsChecked) {
         $running = @()
         foreach ($c in @($state.Configs | Where-Object { $_.Selected })) {
@@ -1870,7 +1924,8 @@ function Start-WPBackup {
             }
         }
     }
-    $state.Settings.Destination = $dest
+    if (-not $cloudAcct) { $state.Settings.Destination = $dest }
+    $state.Settings.DestKind = $kind
     Save-WPSettings
     $ui.BackupLog.Items.Clear()
     $state.LogTarget = $ui.BackupLog
@@ -1879,18 +1934,500 @@ function Start-WPBackup {
         Prune = [bool]$ui.OptPrune.IsChecked; Redownload = [bool]$ui.OptRedownload.IsChecked
     }
     Start-WPJob 'Backup' {
-        Invoke-WPBackup $P.Apps $P.Configs $P.Extras $P.Destination $P.Options
-    } @{ Apps = @($state.Apps); Configs = @($state.Configs); Extras = @($state.Extras); Destination = $dest; Options = $opts } {
+        $r = Invoke-WPBackup $P.Apps $P.Configs $P.Extras $P.Destination $P.Options
+        if ($P.AccountId -and $r -and -not $r.Cancelled) {
+            $acct = Get-WPCloudAccount $P.AccountId
+            try { $r.Cloud = Sync-WPCloudUpload $acct $P.Destination $P.RemoteDir }
+            catch {
+                $why = "$_"
+                Write-WPLog ("The upload stopped: {0}" -f $why) 'error'
+                $prov = Get-WPCloudProvider $acct.Provider
+                $r.Cloud = [pscustomobject]@{ Provider = $prov.Name; Verified = $false; Problems = @("The upload stopped: $why"); Files = 0; Bytes = 0; Web = ''; Where = '' }
+            }
+        }
+        $r
+    } @{ Apps = @($state.Apps); Configs = @($state.Configs); Extras = @($state.Extras); Destination = $dest; Options = $opts; AccountId = $(if ($cloudAcct) { $cloudAcct.Id } else { '' }); RemoteDir = $remoteDir } {
         param($r, $err)
         if ($r -and $r.Report) {
             $state.LastReport = [string]$r.Report
             $msg = 'Backup saved.'
+            if ($r.Cloud) { $msg = $(if ($r.Cloud.Verified) { "Backup uploaded and verified on $($r.Cloud.Provider)." } else { "Backup saved on this PC, but it didn't fully upload to $($r.Cloud.Provider). Run it again to retry." }) }
             if ($r.Failed) { $msg += " $($r.Failed) downloads failed; the restore installs those with winget online." }
             Set-WPStatus $msg
             Update-WPDestInfo -CheckExisting
-            if ($r.Readiness) { Show-WPReadiness $r.Readiness; $state.LastReadyReport = Join-Path ([string]$r.Destination) 'Ready to reset.html'; Confirm-WPSyncUpload $r.Readiness }
+            if ($r.Readiness) {
+                Show-WPReadiness $r.Readiness $r.Cloud
+                $state.LastReadyReport = Join-Path ([string]$r.Destination) 'Ready to reset.html'
+                if (-not $r.Cloud) { Confirm-WPSyncUpload $r.Readiness }
+            }
         }
         foreach ($a in $state.Apps) { Update-WPAppRow $a }
+    }
+}
+
+#endregion
+
+#region Cloud destinations ------------------------------------------------------
+
+# Rows for dropdowns built in code (the restore dialog). Same look as the Backup page's XAML items.
+$CloudKindRows = @(
+    @{ Header = 'CLOUD ACCOUNT' }
+    @{ Tag = 'onedrive'; Glyph = 0xE753; Color = '#4BA3F2'; Name = 'OneDrive'; Sub = 'Microsoft account' }
+    @{ Tag = 'googledrive'; Glyph = 0xE753; Color = '#3DDC97'; Name = 'Google Drive'; Sub = 'Google account' }
+    @{ Tag = 'dropbox'; Glyph = 0xE753; Color = '#7B9CE9'; Name = 'Dropbox'; Sub = 'Dropbox account' }
+    @{ Header = 'SELF-HOSTED AND HOMELAB' }
+    @{ Tag = 'nextcloud'; Glyph = 0xE80F; Color = '#C094F0'; Name = 'Nextcloud'; Sub = 'Docker, AIO, a NAS app or hosted' }
+    @{ Tag = 'webdav'; Glyph = 0xE774; Color = '#C094F0'; Name = 'WebDAV server'; Sub = 'ownCloud, Synology, QNAP, Seafile, pCloud, Koofr...' }
+    @{ Tag = 's3'; Glyph = 0xE7B8; Color = '#C094F0'; Name = 'S3-compatible storage'; Sub = 'MinIO, Garage, Backblaze B2, Wasabi, Cloudflare R2...' }
+)
+
+function Test-WPCloudKind { param([string]$Kind) return ($Kind -and @('folder', 'synced') -notcontains $Kind) }
+
+function New-WPKindVisual {
+    # Icon + name + one-line description, as shown in the dropdowns.
+    param([int]$Glyph, [string]$Color, [string]$Name, [string]$Sub)
+    $sp = New-Object Windows.Controls.StackPanel
+    $sp.Orientation = 'Horizontal'
+    $ic = New-Object Windows.Controls.TextBlock
+    $ic.Text = [string][char]$Glyph; $ic.FontFamily = $window.FindResource('Icons'); $ic.FontSize = 17; $ic.Width = 30
+    $ic.Foreground = Get-WPBrush $Color; $ic.VerticalAlignment = 'Center'
+    [void]$sp.Children.Add($ic)
+    $tx = New-Object Windows.Controls.StackPanel
+    [void]$tx.Children.Add((New-WPText $Name 13 $Palette.Text 'SemiBold'))
+    [void]$tx.Children.Add((New-WPText $Sub 11.5 $Palette.Muted))
+    [void]$sp.Children.Add($tx)
+    return $sp
+}
+
+function Set-WPComboDisplay {
+    # The closed dropdown shows a copy of the selected item (an item's own visuals can't be in two places).
+    param($Combo)
+    $item = $Combo.SelectedItem
+    if (-not $item -or -not ($item.Content -is [Windows.Controls.StackPanel])) { $Combo.Tag = $null; return }
+    $src = $item.Content
+    $icon = $src.Children[0]; $texts = $src.Children[1]
+    $Combo.Tag = New-WPKindVisual ([int][char]$icon.Text) ($icon.Foreground.Color.ToString() -replace '^#FF', '#') $texts.Children[0].Text $texts.Children[1].Text
+}
+
+function Select-WPComboTag {
+    param($Combo, [string]$Tag)
+    foreach ($it in $Combo.Items) { if ([string]$it.Tag -eq $Tag) { $Combo.SelectedItem = $it; return $true } }
+    return $false
+}
+
+function Get-WPDestKind {
+    $i = $ui.DestKind.SelectedItem
+    if ($i -and $i.Tag) { return [string]$i.Tag }
+    return 'folder'
+}
+
+function Get-WPCloudComputer { if ($Demo) { return 'ALEX-PC' } return $env:COMPUTERNAME }
+
+function New-WPCloudPanel {
+    # Loads lib\CloudPanel.xaml into a host and returns its parts. Handlers find the panel via Tag.
+    param($HostPanel)
+    $root = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText((Join-Path $WPRoot 'lib\CloudPanel.xaml'), [Text.Encoding]::UTF8))
+    [void]$HostPanel.Children.Add($root)
+    $p = @{ Root = $root; Provider = ''; OnChanged = $null; PendingThumb = '' }
+    foreach ($n in @('CpConnect', 'CpBlurb', 'CpFields', 'CpServerLabel', 'CpServer', 'CpRegionLabel', 'CpRegion', 'CpBucketLabel', 'CpBucket', 'CpUserLabel', 'CpUser',
+            'CpPassLabel', 'CpPass', 'CpPathStyle', 'CpHint', 'CpConnectBtn', 'CpConnectText', 'CpConnectIcon', 'CpCancel', 'CpStatus', 'CpAccount', 'CpDisconnect',
+            'CpAccountName', 'CpAccountWhere', 'CpAccountSpace', 'CpNote')) { $p[$n] = $root.FindName($n) }
+    $p.CpConnectBtn.Tag = $p
+    $p.CpConnectBtn.Add_Click({ Start-WPCloudConnect $this.Tag })
+    $p.CpDisconnect.Tag = $p
+    $p.CpDisconnect.Add_Click({ Disconnect-WPCloudPanel $this.Tag })
+    $p.CpCancel.Add_Click({ Stop-WPJobs })
+    foreach ($tb in @($p.CpServer, $p.CpUser, $p.CpBucket)) {
+        $tb.Tag = $p
+        $tb.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Return') { Start-WPCloudConnect $s.Tag } })
+    }
+    return $p
+}
+
+function Set-WPCloudPanelProvider {
+    param($P, [string]$Provider)
+    $P.Provider = $Provider
+    $P.PendingThumb = ''
+    $prov = Get-WPCloudProvider $Provider
+    $P.CpBlurb.Text = $prov.Blurb
+    $show = @{ Server = $false; Region = $false; Bucket = $false; User = $false; Pass = $false; Path = $false }
+    $P.CpHint.Text = ''
+    switch ($prov.Kind) {
+        'nextcloud' {
+            $show.Server = $true
+            $P.CpServerLabel.Text = 'Server address'
+            $P.CpHint.Text = 'For example https://cloud.example.com or https://192.168.1.20:8443. Your browser opens so you can log in; WinPrestige never sees your Nextcloud password.'
+            $P.CpConnectText.Text = 'Connect to Nextcloud'
+        }
+        'webdav' {
+            $show.Server = $true; $show.User = $true; $show.Pass = $true
+            $P.CpServerLabel.Text = 'WebDAV address'; $P.CpUserLabel.Text = 'User name'; $P.CpPassLabel.Text = 'Password'
+            $P.CpHint.Text = "ownCloud: https://server/remote.php/dav/files/USER/    Synology (WebDAV Server package): https://nas:5006/home`nQNAP: https://nas/Public    Seafile: https://server/seafdav    pCloud: https://webdav.pcloud.com    Koofr: https://app.koofr.net/dav/Koofr`nUse an app password where the service offers one. It's stored encrypted for your Windows account."
+            $P.CpConnectText.Text = 'Connect'
+        }
+        's3' {
+            $show.Server = $true; $show.Region = $true; $show.Bucket = $true; $show.User = $true; $show.Pass = $true; $show.Path = $true
+            $P.CpServerLabel.Text = 'Endpoint'; $P.CpUserLabel.Text = 'Access key'; $P.CpPassLabel.Text = 'Secret key'
+            if (-not $P.CpRegion.Text) { $P.CpRegion.Text = 'us-east-1' }
+            $P.CpHint.Text = "MinIO: https://minio.lan:9000    Garage: https://garage.lan:3900 (region garage)    Backblaze B2: https://s3.us-west-004.backblazeb2.com`nWasabi: https://s3.us-east-1.wasabisys.com    Cloudflare R2: https://ACCOUNT.r2.cloudflarestorage.com (region auto)`nUse a key that can only reach this bucket. It's stored encrypted for your Windows account."
+            $P.CpConnectText.Text = 'Connect'
+        }
+        default {
+            $P.CpConnectText.Text = switch ($Provider) { 'onedrive' { 'Sign in with Microsoft' } 'googledrive' { 'Sign in with Google' } default { 'Sign in with Dropbox' } }
+        }
+    }
+    foreach ($pair in @(@('Server', 'CpServerLabel', 'CpServer'), @('Region', 'CpRegionLabel', 'CpRegion'), @('Bucket', 'CpBucketLabel', 'CpBucket'), @('User', 'CpUserLabel', 'CpUser'), @('Pass', 'CpPassLabel', 'CpPass'))) {
+        $v = $(if ($show[$pair[0]]) { 'Visible' } else { 'Collapsed' })
+        $P[$pair[1]].Visibility = $v; $P[$pair[2]].Visibility = $v
+    }
+    $P.CpPathStyle.Visibility = $(if ($show.Path) { 'Visible' } else { 'Collapsed' })
+    $P.CpHint.Visibility = $(if ($P.CpHint.Text) { 'Visible' } else { 'Collapsed' })
+    $P.CpFields.Visibility = $(if ($prov.Kind -eq 'oauth') { 'Collapsed' } else { 'Visible' })
+    $P.CpStatus.Visibility = 'Collapsed'
+    Update-WPCloudPanel $P
+}
+
+function Get-WPCloudPanelAccount {
+    param($P)
+    if (-not $P -or -not $P.Provider) { return $null }
+    if ($Demo) { return $state.DemoCloud[$P.Provider] }
+    $id = [string]$state.Settings.CloudAccounts[$P.Provider]
+    $a = $null
+    if ($id) { $a = Get-WPCloudAccount $id }
+    if (-not $a) { $a = @(Get-WPCloudAccounts | Where-Object { $_.Provider -eq $P.Provider }) | Select-Object -Last 1 }
+    return $a
+}
+
+function Update-WPCloudPanel {
+    param($P)
+    $a = Get-WPCloudPanelAccount $P
+    if ($a) {
+        $P.CpConnect.Visibility = 'Collapsed'
+        $P.CpAccount.Visibility = 'Visible'
+        $P.CpAccountName.Text = [string]$a.Label
+        $P.CpAccountWhere.Text = 'Saves to ' + (Get-WPCloudWhere $a (Get-WPCloudRemoteDir $a (Get-WPCloudComputer)))
+        $space = ''
+        if ($a.Free -and [long]$a.Free -gt 0) { $space = "$(Format-WPSize $a.Free) free" ; if ($a.Total -and [long]$a.Total -gt 0) { $space += " of $(Format-WPSize $a.Total)" } }
+        $P.CpAccountSpace.Text = $space
+        $P.CpAccountSpace.Visibility = $(if ($space) { 'Visible' } else { 'Collapsed' })
+    } else {
+        $P.CpConnect.Visibility = 'Visible'
+        $P.CpAccount.Visibility = 'Collapsed'
+    }
+    if ($P.OnChanged) { & $P.OnChanged $P }
+}
+
+function Set-WPCloudPanelStatus {
+    param($P, [string]$Text, [string]$Color = $Palette.Muted)
+    $P.CpStatus.Text = $Text
+    $P.CpStatus.Foreground = Get-WPBrush $Color
+    $P.CpStatus.Visibility = $(if ($Text) { 'Visible' } else { 'Collapsed' })
+}
+
+function Set-WPCloudPanelBusy {
+    param($P, [bool]$Busy, [string]$Text)
+    $P.CpConnectBtn.IsEnabled = -not $Busy
+    $P.CpCancel.Visibility = $(if ($Busy) { 'Visible' } else { 'Collapsed' })
+    if ($Busy) { Set-WPCloudPanelStatus $P $Text $Palette.Soft }
+}
+
+function Stop-WPJobs {
+    $sync.Cancel = $true
+    if ('WinPrestige.CloudHttp' -as [type]) { [WinPrestige.CloudHttp]::Cancel = $true }
+    Set-WPStatus "Stopping$Ellipsis"
+}
+
+function Start-WPCloudConnect {
+    param($P)
+    if (-not $P.CpConnectBtn.IsEnabled) { return }
+    $prov = Get-WPCloudProvider $P.Provider
+    $f = @{
+        Provider = $P.Provider; Server = $P.CpServer.Text.Trim(); Region = $P.CpRegion.Text.Trim(); Bucket = $P.CpBucket.Text.Trim()
+        User = $P.CpUser.Text.Trim(); Pass = $P.CpPass.Password; PathStyle = [bool]$P.CpPathStyle.IsChecked; Thumbprint = [string]$P.PendingThumb
+    }
+    $missing = @()
+    if ($prov.Kind -ne 'oauth' -and -not $f.Server) { $missing += $P.CpServerLabel.Text.ToLower() }
+    if ($prov.Kind -eq 'webdav' -and -not $f.User) { $missing += 'user name' }
+    if ($prov.Kind -eq 's3') { if (-not $f.Bucket) { $missing += 'bucket' }; if (-not $f.User) { $missing += 'access key' }; if (-not $f.Pass) { $missing += 'secret key' } }
+    if ($missing.Count) { Set-WPCloudPanelStatus $P ("Fill in the " + ($missing -join ', ') + ' first.') $Palette.Warn; return }
+    $waiting = $(if (@('oauth', 'nextcloud') -contains $prov.Kind) { "Waiting for you to sign in to $($prov.Name) in your browser$Ellipsis" } else { "Checking the connection$Ellipsis" })
+    Set-WPCloudPanelBusy $P $true $waiting
+    $state.CloudBusyPanel = $P
+    if ($Demo) {
+        $t = New-Object Windows.Threading.DispatcherTimer
+        $t.Interval = [TimeSpan]::FromMilliseconds(1100)
+        $t.Add_Tick({
+                $this.Stop()
+                $bp = $state.CloudBusyPanel
+                $state.DemoCloud[$bp.Provider] = Get-WPDemoCloudAccount $bp.Provider
+                Set-WPCloudPanelBusy $bp $false
+                Set-WPCloudPanelStatus $bp ''
+                Update-WPCloudPanel $bp
+                Set-WPStatus "Connected to $((Get-WPCloudProvider $bp.Provider).Name)."
+            })
+        $t.Start()
+        return
+    }
+    $state.LogTarget = $(if ($script:RestoreDlg -and $P -eq $script:RestoreDlg.Panel) { $ui.RestoreLog } else { $ui.BackupLog })
+    Start-WPJob 'Sign-in' {
+        $f = $P.Fields
+        switch ($f.Provider) {
+            'nextcloud' { Connect-WPNextcloud $f.Server $f.Thumbprint }
+            'webdav' { Connect-WPWebDav $f.Server $f.User $f.Pass $f.Thumbprint }
+            's3' { Connect-WPS3 $f.Server $f.Region $f.Bucket $f.User $f.Pass $f.PathStyle $f.Thumbprint }
+            default { Connect-WPCloudOAuth $f.Provider }
+        }
+    } @{ Fields = $f } {
+        param($r, $err)
+        $bp = $state.CloudBusyPanel
+        Set-WPCloudPanelBusy $bp $false
+        $prov = Get-WPCloudProvider $bp.Provider
+        if ($err) {
+            $m = [string]$err.Message
+            if ($m -match 'CERT:([0-9A-Fa-f]+)\|(.*)') {
+                $thumb = $Matches[1]; $subject = $Matches[2]
+                $ans = [System.Windows.MessageBox]::Show($window, "Windows doesn't trust this server's certificate (it may be self-signed, which is common on a home server).`n`n$subject`nThumbprint: $thumb`n`nOnly continue if this is your own server. Trust it for WinPrestige?", 'WinPrestige', 'YesNo', 'Warning')
+                if ($ans -eq 'Yes') { $bp.PendingThumb = $thumb; Start-WPCloudConnect $bp } else { Set-WPCloudPanelStatus $bp 'Not connected: the certificate was not trusted.' $Palette.Warn }
+                return
+            }
+            if ($m -match 'NOAPP:') {
+                Set-WPCloudPanelStatus $bp "This copy of WinPrestige isn't registered with $($prov.Name) yet, so it can't sign in. Whoever builds it adds an app ID to data\cloud-apps.json (see docs\CLOUD-SETUP.md). Until then, use a synced folder, Nextcloud, WebDAV or S3." $Palette.Warn
+                return
+            }
+            if ($m -match 'Cancelled') { Set-WPCloudPanelStatus $bp 'Sign-in cancelled.' $Palette.Muted; return }
+            Set-WPCloudPanelStatus $bp $m $Palette.Bad
+            return
+        }
+        if ($r -and $r.Id) {
+            if ($Demo) { return }
+            $state.Settings.CloudAccounts[$bp.Provider] = [string]$r.Id
+            Save-WPSettings
+            $bp.CpPass.Password = ''
+            Set-WPCloudPanelStatus $bp ''
+            Update-WPCloudPanel $bp
+            Set-WPStatus "Connected to $($prov.Name) as $($r.Label)."
+        }
+    }
+}
+
+function Disconnect-WPCloudPanel {
+    param($P)
+    $a = Get-WPCloudPanelAccount $P
+    if (-not $a) { return }
+    $prov = Get-WPCloudProvider $P.Provider
+    $ans = [System.Windows.MessageBox]::Show($window, "Sign out of $($prov.Name) ($($a.Label)) on this PC?`n`nWinPrestige forgets the sign-in. Backups already in $($prov.Name) stay where they are.", 'WinPrestige', 'OKCancel', 'Question')
+    if ($ans -ne 'OK') { return }
+    if ($Demo) { $state.DemoCloud.Remove($P.Provider) } else {
+        Remove-WPCloudAccount $a.Id
+        $state.Settings.CloudAccounts.Remove($P.Provider)
+        Save-WPSettings
+    }
+    Update-WPCloudPanel $P
+}
+
+function Set-WPDestKind {
+    # Switches the Backup page between folder destinations and a cloud account.
+    param([string]$Kind)
+    Set-WPComboDisplay $ui.DestKind
+    $prevKind = [string]$state.Settings.DestKind
+    $state.Settings.DestKind = $Kind
+    $cloud = Test-WPCloudKind $Kind
+    $ui.FolderPanel.Visibility = $(if ($cloud) { 'Collapsed' } else { 'Visible' })
+    $ui.CloudHost.Visibility = $(if ($cloud) { 'Visible' } else { 'Collapsed' })
+    if ($cloud) {
+        if (-not $script:BackupCloud) {
+            $script:BackupCloud = New-WPCloudPanel $ui.CloudHost
+            $script:BackupCloud.OnChanged = { param($p) if (Test-WPCloudKind (Get-WPDestKind)) { Update-WPDestInfo -CheckExisting } }
+        }
+        Set-WPCloudPanelProvider $script:BackupCloud $Kind
+        return
+    }
+    # Folder kinds: offer the right chips, and move the path over when the kind changes.
+    Set-WPDestChips $Kind
+    $p = $ui.DestBox.Text.Trim()
+    $isSynced = [bool](Get-WPSyncProvider $p $(if ($Demo) { @() } else { $null }))
+    if ($Kind -eq 'synced' -and -not $isSynced) {
+        $first = $ui.DestChips.Children | Select-Object -First 1
+        if ($first) { $ui.DestBox.Text = [string]$first.Tag }
+    } elseif ($Kind -eq 'folder' -and $isSynced -and $prevKind -eq 'synced') {
+        $ui.DestBox.Text = $(if ($state.Settings.Destination -and -not (Get-WPSyncProvider $state.Settings.Destination)) { $state.Settings.Destination } else { Get-WPSuggestedDestination })
+    }
+    Update-WPDestInfo -CheckExisting
+}
+
+function Get-WPCloudLastUpload {
+    param($Account)
+    if (-not $Account -or $Demo) { return $null }
+    return (Read-WPJson (Join-Path $script:WP.StateDir "Cloud\$($Account.Id)\last-upload.json"))
+}
+
+function Update-WPCloudDestInfo {
+    # The info line (and Ready card) under the Backup page's cloud panel.
+    param([switch]$CheckExisting)
+    $P = $script:BackupCloud
+    $prov = Get-WPCloudProvider $P.Provider
+    $a = Get-WPCloudPanelAccount $P
+    if (-not $a) {
+        $ui.DestInfo.Text = ''
+        $ui.DestInfo.Visibility = 'Collapsed'
+        $ui.ReadyCard.Visibility = 'Collapsed'
+        return
+    }
+    $ui.DestInfo.Visibility = 'Visible'
+    $msgs = @("WinPrestige builds the backup in a folder on this PC first, then uploads it and checks every file on $($prov.Name). Later backups only send what changed.")
+    if (-not $Demo) {
+        $staging = Get-WPCloudStaging $a
+        $free = Get-WPFreeSpace $staging
+        if ($null -ne $free) { $msgs += "$(Format-WPSize $free) free on $([IO.Path]::GetPathRoot($staging).TrimEnd('\')) for that." }
+        $last = Get-WPCloudLastUpload $a
+        if ($last) {
+            $when = ([datetime]$last.Date).ToString('d MMM yyyy HH:mm')
+            $msgs += $(if ($last.Verified) { "Last upload $($when): all $('{0:N0}' -f [int]$last.Files) files verified." } else { "Last upload $($when): $(@($last.Problems).Count) files didn't check out." })
+        }
+        if ($CheckExisting) {
+            $mf = Join-Path $staging 'manifest.json'
+            if (Test-Path -LiteralPath $mf) {
+                try {
+                    $m = Read-WPJson $mf
+                    $state.LastReport = Join-Path $staging 'AppInventory.html'
+                    Show-WPReadiness (Get-WPReadiness $staging $m) -Cloud $last
+                } catch { }
+            } else { $ui.ReadyCard.Visibility = 'Collapsed' }
+        }
+    }
+    $ui.DestInfo.Text = $msgs -join '  '
+    $ui.DestInfo.Foreground = Get-WPBrush $Palette.Muted
+}
+
+function Get-WPCloudDownloadFolder {
+    # Where a cloud backup lands on this PC: a second drive if there is one, else the user folder.
+    param([string]$Computer)
+    $name = Get-WPSafeName $(if ($Computer) { $Computer } else { 'Backup' })
+    if ($Demo) { return "D:\WinPrestige Backup\$name" }
+    foreach ($d in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)) {
+        if ($d.DeviceID -ne $env:SystemDrive -and $d.FreeSpace -gt 20GB) { return "$($d.DeviceID)\WinPrestige Backup\$name" }
+    }
+    return (Join-Path $env:USERPROFILE "WinPrestige Backup\$name")
+}
+
+function Show-WPCloudRestore {
+    # "Load from a cloud account": sign in, pick a backup, download and check it, load it.
+    if ($script:RestoreDlg) { $script:RestoreDlg.Win.Activate() | Out-Null; return }
+    $dlg = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText((Join-Path $WPRoot 'lib\CloudRestore.xaml'), [Text.Encoding]::UTF8))
+    $dlg.Resources.MergedDictionaries.Add($window.Resources)
+    $dlg.Owner = $window
+    if ($window.Icon) { $dlg.Icon = $window.Icon }
+    $d = @{ Win = $dlg; Backups = @() }
+    foreach ($n in @('RcKind', 'RcHost', 'RcRefresh', 'RcListInfo', 'RcList', 'RcBrowse', 'RcDest', 'RcStatus', 'RcProgress', 'RcClose', 'RcDownload')) { $d[$n] = $dlg.FindName($n) }
+    $script:RestoreDlg = $d
+    foreach ($row in $CloudKindRows) {
+        $it = New-Object Windows.Controls.ComboBoxItem
+        if ($row.Header) { $it.Style = $window.FindResource('ComboHeader'); $it.Content = $row.Header }
+        else { $it.Tag = $row.Tag; $it.Content = New-WPKindVisual $row.Glyph $row.Color $row.Name $row.Sub }
+        [void]$d.RcKind.Items.Add($it)
+    }
+    $d.Panel = New-WPCloudPanel $d.RcHost
+    $d.Panel.OnChanged = { param($p) Update-WPCloudRestoreList }
+    $d.RcKind.Add_SelectionChanged({
+            $rd = $script:RestoreDlg
+            Set-WPComboDisplay $rd.RcKind
+            if ($rd.RcKind.SelectedItem -and $rd.RcKind.SelectedItem.Tag) { Set-WPCloudPanelProvider $rd.Panel ([string]$rd.RcKind.SelectedItem.Tag) }
+        })
+    $d.RcList.Add_SelectionChanged({
+            $rd = $script:RestoreDlg
+            $sel = $rd.RcList.SelectedItem
+            $rd.RcDownload.IsEnabled = [bool]$sel
+            if ($sel) { $rd.RcDest.Text = Get-WPCloudDownloadFolder $sel.Tag.Computer }
+        })
+    $d.RcRefresh.Add_Click({ Update-WPCloudRestoreList -Force })
+    $d.RcBrowse.Add_Click({
+            $f = New-Object System.Windows.Forms.FolderBrowserDialog
+            $f.Description = 'Pick where to download the backup to.'
+            $f.ShowNewFolderButton = $true
+            if ($f.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { $script:RestoreDlg.RcDest.Text = $f.SelectedPath }
+        })
+    $d.RcClose.Add_Click({ $script:RestoreDlg.Win.Close() })
+    $d.RcDownload.Add_Click({ Start-WPCloudDownload })
+    $dlg.Add_Closed({ $script:RestoreDlg = $null })
+    $start = $(if (Test-WPCloudKind ([string]$state.Settings.DestKind)) { [string]$state.Settings.DestKind } else { '' })
+    if (-not $start) { $acc = @(Get-WPCloudAccounts) | Select-Object -Last 1; $start = $(if ($acc) { $acc.Provider } else { 'onedrive' }) }
+    $d.RcDest.Text = Get-WPCloudDownloadFolder ''
+    [void](Select-WPComboTag $d.RcKind $start)
+    $dlg.Show()
+}
+
+function Update-WPCloudRestoreList {
+    param([switch]$Force)
+    $rd = $script:RestoreDlg
+    if (-not $rd) { return }
+    $a = Get-WPCloudPanelAccount $rd.Panel
+    $rd.RcList.Items.Clear()
+    $rd.RcDownload.IsEnabled = $false
+    if (-not $a) { $rd.RcListInfo.Text = 'Sign in above to see your backups.'; return }
+    $rd.RcListInfo.Text = "Looking in $(Get-WPCloudWhere $a ([string]$a.Root))$Ellipsis"
+    if ($Demo) { Show-WPCloudRestoreList @(Find-WPDemoCloudBackups) $a; return }
+    $state.LogTarget = $ui.RestoreLog
+    Start-WPJob 'Find backups' { @{ List = @(Find-WPCloudBackups (Get-WPCloudAccount $P.Id)) } } @{ Id = $a.Id } {
+        param($r, $err)
+        $rd = $script:RestoreDlg
+        if (-not $rd) { return }
+        if ($err) { $rd.RcListInfo.Text = "Couldn't list backups: $($err.Message)"; $rd.RcListInfo.Foreground = Get-WPBrush $Palette.Bad; return }
+        Show-WPCloudRestoreList @($r.List) (Get-WPCloudPanelAccount $rd.Panel)
+    } -Quiet
+}
+
+function Show-WPCloudRestoreList {
+    param([object[]]$List, $Account)
+    $rd = $script:RestoreDlg
+    $rd.RcList.Items.Clear()
+    $rd.RcListInfo.Foreground = Get-WPBrush $Palette.Muted
+    $List = @($List | Where-Object { $_ })
+    if (-not $List.Count) { $rd.RcListInfo.Text = "No WinPrestige backups in $(Get-WPCloudWhere $Account ([string]$Account.Root)) yet."; return }
+    $rd.RcListInfo.Text = $(if ($List.Count -eq 1) { 'One backup found. Pick it and press Download.' } else { "$($List.Count) backups found, newest first. Pick the one to restore." })
+    foreach ($b in $List) {
+        $it = New-Object Windows.Controls.ListBoxItem
+        $it.Tag = $b
+        $sp = New-Object Windows.Controls.StackPanel
+        [void]$sp.Children.Add((New-WPText ([string]$b.Computer) 14 $Palette.Text 'SemiBold'))
+        $when = ''; try { $when = ([datetime]$b.Created).ToString('d MMM yyyy HH:mm') } catch { }
+        [void]$sp.Children.Add((New-WPText ("Backed up $when   $MidDot   $($b.Apps) apps, $($b.Configs) app settings   $MidDot   $($b.Dir)") 12 $Palette.Muted))
+        $it.Content = $sp
+        [void]$rd.RcList.Items.Add($it)
+    }
+    $rd.RcList.SelectedIndex = 0
+}
+
+function Start-WPCloudDownload {
+    $rd = $script:RestoreDlg
+    $sel = $rd.RcList.SelectedItem
+    $a = Get-WPCloudPanelAccount $rd.Panel
+    if (-not $sel -or -not $a) { return }
+    $dest = $rd.RcDest.Text.Trim().Trim('"')
+    if (-not $dest) { $rd.RcStatus.Text = 'Choose where to download it first.'; return }
+    $rd.RcDownload.IsEnabled = $false
+    $rd.RcProgress.Visibility = 'Visible'; $rd.RcProgress.Value = 0
+    $rd.RcStatus.Text = "Downloading from $((Get-WPCloudProvider $a.Provider).Name)$Ellipsis"
+    $rd.RcStatus.Foreground = Get-WPBrush $Palette.Soft
+    $ui.TabRestore.IsChecked = $true
+    $state.LogTarget = $ui.RestoreLog
+    $job = $(if ($Demo) { { Invoke-WPDemoCloudDownload (Get-WPDemoCloudAccount $P.Provider) $P.Dest } } else { { Receive-WPCloudBackup (Get-WPCloudAccount $P.Id) $P.Dir $P.Dest } })
+    Start-WPJob 'Download' $job @{ Id = $a.Id; Provider = $a.Provider; Dir = $sel.Tag.Dir; Dest = $dest } {
+        param($r, $err)
+        $rd = $script:RestoreDlg
+        if ($rd) { $rd.RcProgress.Visibility = 'Collapsed'; $rd.RcDownload.IsEnabled = $true }
+        if ($err -or -not $r) {
+            $msg = $(if ($err) { $err.Message } else { 'The download stopped.' })
+            if ($rd) { $rd.RcStatus.Text = $msg; $rd.RcStatus.Foreground = Get-WPBrush $Palette.Bad }
+            return
+        }
+        if (-not $r.Complete) {
+            if ($rd) { $rd.RcStatus.Text = "$(@($r.Problems).Count) files didn't download or didn't match the backup. Press Download again to retry them; finished files are kept."; $rd.RcStatus.Foreground = Get-WPBrush $Palette.Warn }
+            return
+        }
+        if ($rd) { $rd.Win.Close() }
+        Import-WPBackup $(if ($Demo) { '\\NAS\Backups\WinPrestige Backup' } else { $r.Destination })
+        if ($Demo) { $ui.RestorePath.Text = [string]$r.Destination }
+        Set-WPStatus ("Downloaded and checked {0:N0} files. The backup is loaded below." -f [int]$r.Files)
     }
 }
 
@@ -2693,12 +3230,15 @@ $ui.BtnReadyReport.Add_Click({
         if (-not $r -and $state.Readiness) { $r = Join-Path $state.Readiness.Root 'Ready to reset.html' }
         if ($r -and (Test-Path -LiteralPath $r)) { Open-WPUrl $r } else { Set-WPStatus 'No readiness report yet. Run a backup first.' }
     })
-$ui.BtnSyncWeb.Add_Click({ if ($state.Readiness -and $state.Readiness.Sync) { Open-WPUrl $state.Readiness.Sync.Web } })
+$ui.BtnSyncWeb.Add_Click({
+        if ($state.ReadyCloud -and $state.ReadyCloud.Web) { Open-WPUrl $state.ReadyCloud.Web }
+        elseif ($state.Readiness -and $state.Readiness.Sync) { Open-WPUrl $state.Readiness.Sync.Web }
+    })
 $ui.BtnSyncConfirm.Add_Click({
         if (-not $state.Readiness) { return }
         $list = @($state.Settings.SyncConfirmed | Where-Object { $_ -and [string]$_.Path -ine $state.Readiness.Root })
         $list += [pscustomobject]@{ Path = $state.Readiness.Root; Date = (Get-Date).ToString('d MMM yyyy HH:mm') }
-        if ($state.Settings.PSObject.Properties['SyncConfirmed']) { $state.Settings.SyncConfirmed = $list } else { $state.Settings | Add-Member -NotePropertyName SyncConfirmed -NotePropertyValue $list -Force }
+        $state.Settings.SyncConfirmed = $list
         if (-not $Demo) { Save-WPSettings }
         Show-WPReadiness $state.Readiness
     })
@@ -2733,10 +3273,11 @@ $ui.BannerClose.Add_Click({
     })
 
 $ui.BtnCancel.Add_Click({
-        $sync.Cancel = $true
+        Stop-WPJobs
         $ui.BtnCancel.IsEnabled = $false
-        Set-WPStatus "Stopping$Ellipsis"
     })
+$ui.BtnLoadCloud.Add_Click({ Show-WPCloudRestore })
+$ui.DestKind.Add_SelectionChanged({ if ($ui.DestKind.SelectedItem -and $ui.DestKind.SelectedItem.Tag) { Set-WPDestKind (Get-WPDestKind) } })
 
 $window.Add_PreviewKeyDown({
         param($s, $e)
@@ -2769,11 +3310,16 @@ $window.Add_Loaded({
         $ui.AdminBadge.Text = "v$($script:WP.Version)"
         if (-not (Test-WPAdmin) -and -not $Screenshot) { $ui.AdminBadge.Text += "  $MidDot  Not elevated: installs and some settings may fail" }
         Show-WPDetails $null
-        Set-WPDestChips
         $dest = $state.Settings.Destination
         if (-not $dest) { $dest = Get-WPSuggestedDestination }
         $ui.DestBox.Text = $dest
-        Update-WPDestInfo
+        $kind = [string]$state.Settings.DestKind
+        if (-not $kind) { $kind = $(if (Get-WPSyncProvider $dest $(if ($Demo) { @() } else { $null })) { 'synced' } else { 'folder' }) }
+        $shotKind = @($ScreenshotSelect -split ';' | Where-Object { $_ -like 'kind=*' }) | Select-Object -First 1
+        if ($shotKind) { $kind = $shotKind.Substring(5) }
+        if ($Demo -and ($ScreenshotSelect -split ';') -contains 'connected' -and (Test-WPCloudKind $kind)) { $state.DemoCloud[$kind] = Get-WPDemoCloudAccount $kind }
+        if (-not (Select-WPComboTag $ui.DestKind $kind)) { [void](Select-WPComboTag $ui.DestKind 'folder') }
+        Set-WPDestKind (Get-WPDestKind)
         Update-WPBackupStats
         $restorePath = $BackupPath
         if (-not $restorePath -and (Test-Path -LiteralPath (Join-Path (Split-Path -Parent $WPRoot) 'manifest.json'))) { $restorePath = Split-Path -Parent $WPRoot }
@@ -2829,7 +3375,8 @@ if ($Screenshot) {
                 $state.ShotActionDone = $true
                 if ($ScreenshotAction -eq 'Backup') {
                     $ui.TabBackup.IsChecked = $true
-                    if ($ScreenshotSelect -like 'dest=*') { $ui.DestBox.Text = $ScreenshotSelect.Substring(5); Update-WPDestInfo }
+                    $destTok = @($ScreenshotSelect -split ';' | Where-Object { $_ -like 'dest=*' }) | Select-Object -First 1
+                    if ($destTok) { $ui.DestBox.Text = $destTok.Substring(5); Update-WPDestInfo }
                     Start-WPBackup
                 }
                 else {
@@ -2851,7 +3398,10 @@ if ($Screenshot) {
                 }
                 if ($ScreenshotTab -eq 'Backup') { $window.Height = 1560 }
                 if ($ScreenshotSelect -match 'height=(\d+)') { $window.Height = [int]$Matches[1] }
-                if ($ScreenshotSelect -like 'dest=*' -and $ScreenshotAction -ne 'Backup') { $ui.DestBox.Text = $ScreenshotSelect.Substring(5); Update-WPDestInfo }
+                $destTok = @($ScreenshotSelect -split ';' | Where-Object { $_ -like 'dest=*' }) | Select-Object -First 1
+                if ($destTok -and $ScreenshotAction -ne 'Backup') { $ui.DestBox.Text = $destTok.Substring(5); Update-WPDestInfo }
+                if (($ScreenshotSelect -split ';') -contains 'dropdown') { $ui.DestKind.IsDropDownOpen = $true }
+                if (($ScreenshotSelect -split ';') -contains 'restoredialog') { $ui.TabRestore.IsChecked = $true; Show-WPCloudRestore }
                 $window.UpdateLayout()
                 Move-WPModeThumb -Instant
                 return
@@ -2861,6 +3411,35 @@ if ($Screenshot) {
             $w = [int]$window.ActualWidth; $h = [int]$window.ActualHeight
             $k = [Math]::Max(1, $ScreenshotScale); $rtb = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int]($w * $k)), ([int]($h * $k)), (96 * $k), (96 * $k), ([Windows.Media.PixelFormats]::Pbgra32)
             $rtb.Render($window)
+            # Popups (the open dropdown) and the restore dialog are separate windows; draw them in too.
+            $extra = @()
+            if ($ui.DestKind.IsDropDownOpen) {
+                $pop = $ui.DestKind.Template.FindName('PART_Popup', $ui.DestKind)
+                if ($pop -and $pop.Child) { $extra += @{ V = $pop.Child; At = $ui.DestKind.TranslatePoint((New-Object Windows.Point 0, ($ui.DestKind.ActualHeight + 6)), $window) } }
+            }
+            if ($script:RestoreDlg) {
+                $dw = $script:RestoreDlg.Win
+                $extra += @{ V = $dw.Content; At = (New-Object Windows.Point ([Math]::Max(0, ($w - $dw.ActualWidth) / 2)), ([Math]::Max(0, ($h - $dw.ActualHeight) / 2))); Back = $true; Size = (New-Object Windows.Size $dw.ActualWidth, $dw.ActualHeight) }
+            }
+            if ($extra.Count) {
+                $dv = New-Object Windows.Media.DrawingVisual
+                $dc = $dv.RenderOpen()
+                $dc.DrawImage($rtb, (New-Object Windows.Rect 0, 0, $w, $h))
+                foreach ($x in $extra) {
+                    $vw = $(if ($x.Size) { $x.Size.Width } else { $x.V.ActualWidth }); $vh = $(if ($x.Size) { $x.Size.Height } else { $x.V.ActualHeight })
+                    $r2 = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int]($vw * $k)), ([int]($vh * $k)), (96 * $k), (96 * $k), ([Windows.Media.PixelFormats]::Pbgra32)
+                    if ($x.Back) {
+                        $bgv = New-Object Windows.Media.DrawingVisual; $bdc = $bgv.RenderOpen()
+                        $bdc.DrawRectangle($window.FindResource('Bg'), (New-Object Windows.Media.Pen ((Get-WPBrush '#2A3A58'), 1)), (New-Object Windows.Rect 0, 0, $vw, $vh)); $bdc.Close(); $r2.Render($bgv)
+                        $dc.DrawRectangle((Get-WPBrush '#000000' 120), $null, (New-Object Windows.Rect 0, 0, $w, $h))
+                    }
+                    $r2.Render($x.V)
+                    $dc.DrawImage($r2, (New-Object Windows.Rect $x.At.X, $x.At.Y, $vw, $vh))
+                }
+                $dc.Close()
+                $rtb = New-Object Windows.Media.Imaging.RenderTargetBitmap ([int]($w * $k)), ([int]($h * $k)), (96 * $k), (96 * $k), ([Windows.Media.PixelFormats]::Pbgra32)
+                $rtb.Render($dv)
+            }
             $enc = New-Object Windows.Media.Imaging.PngBitmapEncoder
             $enc.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($rtb))
             $fs = [IO.File]::Create($Screenshot)

@@ -524,3 +524,65 @@ function Invoke-WPDemoRestore {
     if ($stats.manual) { Write-WPLog 'Use "Open manual links" for the rest, then restart the PC.' 'info' }
     return @{ Ok = $stats.ok; Failed = 0; Manual = $stats.manual; Skipped = $stats.skipped; Unverified = 0; ConfigsOk = $cfgResults.Count; ConfigsBad = 0; Report = ''; Apps = $appResults; Configs = $cfgResults; Complete = (-not (Test-WPCancel)); RestartNeeded = $true }
 }
+
+# Cloud destinations in demo mode: a signed-in account and a simulated upload/verify/download that
+# send the same log and progress messages the real ones do. Nothing leaves the PC.
+function Get-WPDemoCloudAccount {
+    param([string]$Provider)
+    $label = switch ($Provider) {
+        'onedrive' { 'alex.morgan@outlook.com' }
+        'googledrive' { 'alex.morgan@gmail.com' }
+        'dropbox' { 'alex.morgan@outlook.com' }
+        'nextcloud' { 'Alex on cloud.morgan.home' }
+        'webdav' { 'alex on nas.morgan.home' }
+        default { 'winprestige on minio.morgan.home' }
+    }
+    $free = switch ($Provider) { 'onedrive' { 1011GB } 'googledrive' { 1.8TB } 'dropbox' { 1.7TB } default { 3.4TB } }
+    $acct = New-WPCloudAccountObject $Provider @{ Label = $label; Free = [long]$free; Server = 'https://cloud.morgan.home'; Bucket = 'backups'; Endpoint = 'https://minio.morgan.home:9000' }
+    $acct.Id = "demo-$Provider"
+    return $acct
+}
+
+function Invoke-WPDemoCloudUpload {
+    param($Account)
+    $prov = Get-WPCloudProvider $Account.Provider
+    $dir = Get-WPCloudRemoteDir $Account 'ALEX-PC'
+    $where = Get-WPCloudWhere $Account $dir
+    Write-WPLog "Uploading to $($prov.Name): $where" 'step'
+    $files = 1284; $bytes = [long](14.2GB)
+    $steps = @('Installers/OBS Studio/OBS-Studio-31.1-Windows-x64-Installer.exe', 'Installers/Steam/SteamSetup.exe', 'Installers/Discord/DiscordSetup.exe', 'Configs/OBS Studio/obs-studio.zip', 'Installers/Blender/blender-4.5.1-windows-x64.msi', 'Configs/Elgato Stream Deck/StreamDeck.zip')
+    $i = 0
+    foreach ($s in $steps) {
+        if (Test-WPCancel) { return $null }
+        $i++
+        Set-WPProgress ([int](100 * $i / ($steps.Count + 1))) 100 ("Uploading {0}" -f $s)
+        Start-Sleep -Milliseconds 350
+    }
+    Write-WPLog ("Uploaded {0:N0} files ({1}), 0 already there, 0 old files removed." -f $files, (Format-WPSize $bytes)) 'ok'
+    Write-WPLog "Checking every file on $($prov.Name)..." 'step'
+    Set-WPProgress 99 100 "Checking the files on $($prov.Name)..."
+    Start-Sleep -Milliseconds 700
+    Write-WPLog ("Verified on {0}: all {1:N0} files ({2}) are there and sizes and checksums match." -f $prov.Name, $files, (Format-WPSize $bytes)) 'ok'
+    return [pscustomobject]@{
+        Provider = $prov.Name; ProviderId = $Account.Provider; AccountId = $Account.Id; Account = $Account.Label
+        Where = $where; Dir = $dir; Web = $prov.Web; Files = $files; Bytes = $bytes; Uploaded = $files; UploadedBytes = $bytes
+        Skipped = 0; Removed = 0; HashChecked = $files; SizeOnly = 0; Problems = @(); Verified = $true; HashNote = ''; Date = (Get-Date).ToString('s')
+    }
+}
+
+function Find-WPDemoCloudBackups {
+    return @([pscustomobject]@{ Dir = 'WinPrestige Backup/ALEX-PC'; Computer = 'ALEX-PC'; Created = (Get-Date).AddDays(-1).Date.AddHours(21).AddMinutes(14).ToString('s'); Apps = 65; Configs = 18 })
+}
+
+function Invoke-WPDemoCloudDownload {
+    param($Account, [string]$Destination)
+    $prov = Get-WPCloudProvider $Account.Provider
+    Write-WPLog "Downloading the backup from $($prov.Name) to $Destination" 'step'
+    for ($i = 1; $i -le 8; $i++) {
+        if (Test-WPCancel) { return $null }
+        Set-WPProgress ($i * 12) 100 ("Downloading {0} of 1,284 files" -f ($i * 160))
+        Start-Sleep -Milliseconds 300
+    }
+    Write-WPLog 'Downloaded 1,284 files (14.2 GB), 0 were already here and intact.' 'ok'
+    return [pscustomobject]@{ Files = 1284; Bytes = [long](14.2GB); Downloaded = 1284; Kept = 0; Problems = @(); Destination = $Destination; Complete = $true }
+}

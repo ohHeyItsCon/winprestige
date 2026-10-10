@@ -1340,7 +1340,7 @@ function Get-WPSyncFolders {
             if ($j.business) { Add-Sync 'Dropbox' 'Dropbox (work)' $j.business.path 'https://www.dropbox.com/home' }
         } catch { }
     }
-    # Google Drive for desktop shows up as a drive (usually G:) with a "My Drive" folder.
+    # Google Drive for desktop shows up as a drive (usually G:) with a "My Drive" folder; pCloud as "pCloud Drive".
     foreach ($d in @([IO.DriveInfo]::GetDrives())) {
         try {
             if (-not $d.IsReady) { continue }
@@ -1348,7 +1348,34 @@ function Get-WPSyncFolders {
             if ($d.VolumeLabel -match 'Google Drive' -or ($d.DriveFormat -eq 'FAT32' -and (Test-Path -LiteralPath $my) -and (Test-Path -LiteralPath (Join-Path $d.RootDirectory.FullName '.shortcut-targets-by-id')))) {
                 if (Test-Path -LiteralPath $my) { Add-Sync 'Google Drive' 'Google Drive' $my 'https://drive.google.com' }
             }
+            if ($d.VolumeLabel -match 'pCloud') { Add-Sync 'pCloud' 'pCloud Drive' $d.RootDirectory.FullName 'https://my.pcloud.com' }
         } catch { }
+    }
+    # Nextcloud and ownCloud desktop clients list their sync folders (and server) in their config.
+    foreach ($c in @(@('Nextcloud', 'Nextcloud\nextcloud.cfg'), @('ownCloud', 'ownCloud\owncloud.cfg'))) {
+        $cfg = Join-Path $env:APPDATA $c[1]
+        if (-not (Test-Path -LiteralPath $cfg)) { continue }
+        try {
+            $text = [IO.File]::ReadAllText($cfg)
+            $url = ''
+            if ($text -match '(?m)^\d+\\url=(.+)$') { $url = $Matches[1].Trim().TrimEnd('/') + '/apps/files/' }
+            foreach ($m in [regex]::Matches($text, '(?m)^\d+\\Folders\\\d+\\localPath=(.+)$')) {
+                Add-Sync $c[0] $c[0] (($m.Groups[1].Value.Trim()) -replace '/', '\') $url
+            }
+        } catch { }
+    }
+    # Apps that keep a fixed folder in the user profile.
+    $home2 = $env:USERPROFILE
+    foreach ($s in @(
+            @('iCloud Drive', 'iCloud Drive', (Join-Path $home2 'iCloudDrive'), 'https://www.icloud.com/iclouddrive'),
+            @('iCloud Drive', 'iCloud Drive', (Join-Path $home2 'iCloud Drive'), 'https://www.icloud.com/iclouddrive'),
+            @('Box', 'Box', (Join-Path $home2 'Box'), 'https://app.box.com'),
+            @('Synology Drive', 'Synology Drive', (Join-Path $home2 'SynologyDrive'), ''),
+            @('Proton Drive', 'Proton Drive', (Join-Path $home2 'Proton Drive'), 'https://drive.proton.me'),
+            @('MEGA', 'MEGA', (Join-Path $home2 'MEGA'), 'https://mega.nz/fm'),
+            @('MEGA', 'MEGA', (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'MEGAsync'), 'https://mega.nz/fm'),
+            @('Seafile', 'Seafile', (Join-Path $home2 'Seafile'), ''))) {
+        Add-Sync $s[0] $s[1] $s[2] $s[3]
     }
     $list = $script:syncList
     return @($list)
@@ -1367,6 +1394,8 @@ function Get-WPSyncProvider {
     if ($p -match '(?i)\\OneDrive( - [^\\]+)?(\\|$)') { return [pscustomobject]@{ Provider = 'OneDrive'; Label = 'OneDrive'; Path = ''; Web = 'https://onedrive.live.com'; Guessed = $true } }
     if ($p -match '(?i)\\Dropbox( \([^\\]+\))?(\\|$)') { return [pscustomobject]@{ Provider = 'Dropbox'; Label = 'Dropbox'; Path = ''; Web = 'https://www.dropbox.com/home'; Guessed = $true } }
     if ($p -match '(?i)^[A-Z]:\\My Drive(\\|$)') { return [pscustomobject]@{ Provider = 'Google Drive'; Label = 'Google Drive'; Path = ''; Web = 'https://drive.google.com'; Guessed = $true } }
+    if ($p -match '(?i)\\iCloud ?Drive(\\|$)') { return [pscustomobject]@{ Provider = 'iCloud Drive'; Label = 'iCloud Drive'; Path = ''; Web = 'https://www.icloud.com/iclouddrive'; Guessed = $true } }
+    if ($p -match '(?i)\\Nextcloud(\\|$)') { return [pscustomobject]@{ Provider = 'Nextcloud'; Label = 'Nextcloud'; Path = ''; Web = ''; Guessed = $true } }
     return $null
 }
 
@@ -1379,6 +1408,8 @@ function Get-WPSyncAdvice {
         'OneDrive' { 'After the reset, sign in to Windows with the same Microsoft account (or open OneDrive and sign in), wait for the WinPrestige Backup folder to finish downloading, then open it and run Restore.cmd, or pick it in WinPrestige.' }
         'Google Drive' { 'After the reset, install Google Drive for desktop and sign in, right-click the WinPrestige Backup folder in My Drive and choose to make it available offline, then open it and run Restore.cmd, or pick it in WinPrestige.' }
         'Dropbox' { 'After the reset, install Dropbox and sign in, right-click the WinPrestige Backup folder and make it available offline, then open it and run Restore.cmd, or pick it in WinPrestige.' }
+        'iCloud Drive' { 'After the reset, install iCloud for Windows from the Microsoft Store and sign in with your Apple ID, set the WinPrestige Backup folder to "Always keep on this device", then open it and run Restore.cmd, or pick it in WinPrestige.' }
+        { $_ -in 'Nextcloud', 'ownCloud' } { "After the reset, install the $name desktop app and connect it to your server again, let the WinPrestige Backup folder sync down, then open it and run Restore.cmd. Or skip the app: choose Restore > Load from a cloud account > Nextcloud or WebDAV and download it directly." }
         default { 'After the reset, sign in to the sync app again and let the WinPrestige Backup folder download before restoring.' }
     }
     return @{ Before = $before; After = $after }
@@ -2883,3 +2914,6 @@ function Invoke-WPRestore {
 }
 
 #endregion
+
+# Cloud destinations (sign-in, upload, verify, download) live in their own file.
+. (Join-Path $PSScriptRoot 'Cloud.ps1')

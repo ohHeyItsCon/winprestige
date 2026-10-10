@@ -565,6 +565,240 @@
         </Setter.Value>
       </Setter>
     </Style>
+
+    <Style x:Key="PassField" TargetType="PasswordBox">
+      <Setter Property="Background" Value="{StaticResource Panel2}"/>
+      <Setter Property="Foreground" Value="{StaticResource Text}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="CaretBrush" Value="{StaticResource Text}"/>
+      <Setter Property="SelectionBrush" Value="{StaticResource Accent}"/>
+      <Setter Property="Padding" Value="9,7"/>
+      <Setter Property="VerticalContentAlignment" Value="Center"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="PasswordBox">
+            <Border x:Name="bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
+              <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- Destination dropdown. The closed box shows whatever is in Tag (set from code), so a
+         rich item can be shown there without moving the item's own visuals. -->
+    <Style x:Key="ComboItem" TargetType="ComboBoxItem">
+      <Setter Property="Foreground" Value="{StaticResource Text}"/>
+      <Setter Property="Padding" Value="10,7"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <Border x:Name="bd" Background="Transparent" CornerRadius="7" Padding="{TemplateBinding Padding}" Margin="5,1">
+              <ContentPresenter/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsHighlighted" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource Hover}"/>
+              </Trigger>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="ComboHeader" TargetType="ComboBoxItem">
+      <Setter Property="IsEnabled" Value="False"/>
+      <Setter Property="Focusable" Value="False"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBoxItem">
+            <ContentPresenter Margin="16,12,0,4" TextElement.Foreground="{StaticResource Muted}" TextElement.FontSize="11" TextElement.FontWeight="SemiBold"/>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="Combo" TargetType="ComboBox">
+      <Setter Property="Foreground" Value="{StaticResource Text}"/>
+      <Setter Property="ItemContainerStyle" Value="{StaticResource ComboItem}"/>
+      <Setter Property="MaxDropDownHeight" Value="520"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ComboBox">
+            <Grid>
+              <ToggleButton Focusable="False" ClickMode="Press" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                <ToggleButton.Template>
+                  <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="bd" Background="{StaticResource Panel2}" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="9">
+                      <TextBlock x:Name="chev" Text="&#xE70D;" FontFamily="{StaticResource Icons}" FontSize="11" Foreground="{StaticResource Muted}"
+                                 HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,14,0" RenderTransformOrigin="0.5,0.5">
+                        <TextBlock.RenderTransform><RotateTransform x:Name="chevTurn"/></TextBlock.RenderTransform>
+                      </TextBlock>
+                    </Border>
+                    <ControlTemplate.Triggers>
+                      <Trigger Property="IsMouseOver" Value="True">
+                        <Setter TargetName="bd" Property="BorderBrush" Value="#2C3D5E"/>
+                      </Trigger>
+                      <Trigger Property="IsChecked" Value="True">
+                        <Setter TargetName="bd" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                        <Trigger.EnterActions>
+                          <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="chevTurn" Storyboard.TargetProperty="Angle" To="180" Duration="0:0:0.18"/></Storyboard></BeginStoryboard>
+                        </Trigger.EnterActions>
+                        <Trigger.ExitActions>
+                          <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="chevTurn" Storyboard.TargetProperty="Angle" To="0" Duration="0:0:0.18"/></Storyboard></BeginStoryboard>
+                        </Trigger.ExitActions>
+                      </Trigger>
+                    </ControlTemplate.Triggers>
+                  </ControlTemplate>
+                </ToggleButton.Template>
+              </ToggleButton>
+              <ContentPresenter IsHitTestVisible="False" Content="{TemplateBinding Tag}" Margin="12,8,40,8" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+              <Popup x:Name="PART_Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Fade" VerticalOffset="6">
+                <Border Background="#111A2B" BorderBrush="#2A3A58" BorderThickness="1" CornerRadius="10" Padding="0,6"
+                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                  <ScrollViewer VerticalScrollBarVisibility="Auto"><ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained"/></ScrollViewer>
+                </Border>
+              </Popup>
+            </Grid>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+
+    <!-- The sign-in button: brand gradient, a soft halo and a slow sheen. Deliberately gentle. -->
+    <ControlTemplate x:Key="BtnShinyTemplate" TargetType="Button">
+      <Grid RenderTransformOrigin="0.5,0.5">
+        <Grid.RenderTransform><ScaleTransform x:Name="press"/></Grid.RenderTransform>
+        <Border CornerRadius="10" Background="{TemplateBinding Background}" Opacity="0.22" Margin="6,8,6,-2">
+          <Border.Effect><BlurEffect Radius="18"/></Border.Effect>
+          <Border.Triggers>
+            <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+              <BeginStoryboard>
+                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                  <DoubleAnimation Storyboard.TargetProperty="Opacity" From="0.16" To="0.34" Duration="0:0:1.8">
+                    <DoubleAnimation.EasingFunction><SineEase EasingMode="EaseInOut"/></DoubleAnimation.EasingFunction>
+                  </DoubleAnimation>
+                </Storyboard>
+              </BeginStoryboard>
+            </EventTrigger>
+          </Border.Triggers>
+        </Border>
+        <Border CornerRadius="10" Background="{TemplateBinding Background}" ClipToBounds="True">
+          <Rectangle Width="60" HorizontalAlignment="Left" IsHitTestVisible="False">
+            <Rectangle.Triggers>
+              <EventTrigger RoutedEvent="FrameworkElement.Loaded">
+                <BeginStoryboard>
+                  <Storyboard RepeatBehavior="Forever" Duration="0:0:3.6">
+                    <DoubleAnimation Storyboard.TargetProperty="(UIElement.RenderTransform).(TransformGroup.Children)[1].(TranslateTransform.X)" From="-120" To="460" BeginTime="0:0:0.8" Duration="0:0:1.3">
+                      <DoubleAnimation.EasingFunction><SineEase EasingMode="EaseInOut"/></DoubleAnimation.EasingFunction>
+                    </DoubleAnimation>
+                  </Storyboard>
+                </BeginStoryboard>
+              </EventTrigger>
+            </Rectangle.Triggers>
+            <Rectangle.Fill>
+              <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                <GradientStop Color="#00FFFFFF" Offset="0"/>
+                <GradientStop Color="#55FFFFFF" Offset="0.5"/>
+                <GradientStop Color="#00FFFFFF" Offset="1"/>
+              </LinearGradientBrush>
+            </Rectangle.Fill>
+            <Rectangle.RenderTransform>
+              <TransformGroup><SkewTransform AngleX="-22"/><TranslateTransform X="-120"/></TransformGroup>
+            </Rectangle.RenderTransform>
+          </Rectangle>
+        </Border>
+        <Border x:Name="hl" Background="White" CornerRadius="10" Opacity="0"/>
+        <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+      </Grid>
+      <ControlTemplate.Triggers>
+        <Trigger Property="IsMouseOver" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0.12" Duration="0:0:0.15"/></Storyboard></BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard><Storyboard><DoubleAnimation Storyboard.TargetName="hl" Storyboard.TargetProperty="Opacity" To="0" Duration="0:0:0.2"/></Storyboard></BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsPressed" Value="True">
+          <Trigger.EnterActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleX" To="0.97" Duration="0:0:0.07"/>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleY" To="0.97" Duration="0:0:0.07"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.EnterActions>
+          <Trigger.ExitActions>
+            <BeginStoryboard>
+              <Storyboard>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleX" To="1" Duration="0:0:0.2"/>
+                <DoubleAnimation Storyboard.TargetName="press" Storyboard.TargetProperty="ScaleY" To="1" Duration="0:0:0.2"/>
+              </Storyboard>
+            </BeginStoryboard>
+          </Trigger.ExitActions>
+        </Trigger>
+        <Trigger Property="IsEnabled" Value="False">
+          <Setter Property="Opacity" Value="0.55"/>
+        </Trigger>
+      </ControlTemplate.Triggers>
+    </ControlTemplate>
+    <Style x:Key="BtnShiny" TargetType="Button">
+      <Setter Property="Background" Value="{StaticResource Brand}"/>
+      <Setter Property="Foreground" Value="{StaticResource Ink}"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="FontSize" Value="14"/>
+      <Setter Property="Padding" Value="24,11"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template" Value="{StaticResource BtnShinyTemplate}"/>
+    </Style>
+
+    <!-- A list you pick one thing from (cloud backups in the restore dialog). -->
+    <Style x:Key="PickList" TargetType="ListBox">
+      <Setter Property="Background" Value="{StaticResource Panel2}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource Line}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Foreground" Value="{StaticResource Text}"/>
+      <Setter Property="Padding" Value="4"/>
+      <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBox">
+            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
+              <ScrollViewer Padding="{TemplateBinding Padding}" Focusable="False"><ItemsPresenter/></ScrollViewer>
+            </Border>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+      <Setter Property="ItemContainerStyle">
+        <Setter.Value>
+          <Style TargetType="ListBoxItem">
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+              <Setter.Value>
+                <ControlTemplate TargetType="ListBoxItem">
+                  <Border x:Name="bd" Background="Transparent" CornerRadius="8" Padding="10,8" Margin="0,1">
+                    <ContentPresenter/>
+                  </Border>
+                  <ControlTemplate.Triggers>
+                    <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="bd" Property="Background" Value="{StaticResource Hover}"/></Trigger>
+                    <Trigger Property="IsSelected" Value="True"><Setter TargetName="bd" Property="Background" Value="{StaticResource AccentSoft}"/></Trigger>
+                  </ControlTemplate.Triggers>
+                </ControlTemplate>
+              </Setter.Value>
+            </Setter>
+          </Style>
+        </Setter.Value>
+      </Setter>
+    </Style>
   </Window.Resources>
 
   <Grid TextElement.Foreground="{StaticResource Text}">
@@ -784,15 +1018,54 @@
             <Border Style="{StaticResource Card}">
               <StackPanel>
                 <TextBlock Text="Where to save the backup" FontSize="15" FontWeight="SemiBold"/>
-                <TextBlock Text="Pick a folder the reset won't wipe: your NAS, a USB or second drive, or a OneDrive, Google Drive or Dropbox folder. Running the backup again updates it in place."
+                <TextBlock Text="Somewhere the reset won't wipe: your NAS or another drive, a synced folder, or a cloud account you sign in to. Running the backup again updates it in place."
                            Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,3,0,12"/>
-                <DockPanel>
-                  <Button x:Name="BtnBrowseDest" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="8,0,0,0" Padding="14,8">
-                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Browse"/></StackPanel>
-                  </Button>
-                  <TextBox x:Name="DestBox" Style="{StaticResource Field}" FontFamily="Cascadia Mono, Consolas"/>
-                </DockPanel>
-                <WrapPanel x:Name="DestChips" Margin="0,10,0,0"/>
+                <ComboBox x:Name="DestKind" Style="{StaticResource Combo}" HorizontalAlignment="Left" MinWidth="440" Height="52" Margin="0,0,0,12">
+                  <ComboBoxItem Tag="folder">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8B7;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="Drive, USB or NAS folder" FontWeight="SemiBold"/><TextBlock Text="Another drive, a USB disk or a network share" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Tag="synced">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE895;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="{StaticResource Accent}" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="Synced folder on this PC" FontWeight="SemiBold"/><TextBlock Text="A folder your OneDrive, Google Drive, Dropbox, iCloud or Nextcloud app uploads" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Style="{StaticResource ComboHeader}" Content="CLOUD ACCOUNT  -  SIGN IN, UPLOAD AND VERIFY"/>
+                  <ComboBoxItem Tag="onedrive">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="#4BA3F2" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="OneDrive" FontWeight="SemiBold"/><TextBlock Text="Microsoft account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Tag="googledrive">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="#3DDC97" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="Google Drive" FontWeight="SemiBold"/><TextBlock Text="Google account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Tag="dropbox">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="#7B9CE9" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="Dropbox" FontWeight="SemiBold"/><TextBlock Text="Dropbox account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Style="{StaticResource ComboHeader}" Content="SELF-HOSTED AND HOMELAB"/>
+                  <ComboBoxItem Tag="nextcloud">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE80F;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="{StaticResource Purple}" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="Nextcloud" FontWeight="SemiBold"/><TextBlock Text="Docker, AIO, a NAS app or hosted. Browser sign-in" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Tag="webdav">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="{StaticResource Purple}" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="WebDAV server" FontWeight="SemiBold"/><TextBlock Text="ownCloud, Synology, QNAP, Seafile, pCloud, Koofr..." Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                  <ComboBoxItem Tag="s3">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7B8;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="{StaticResource Purple}" VerticalAlignment="Center"/>
+                      <StackPanel><TextBlock Text="S3-compatible storage" FontWeight="SemiBold"/><TextBlock Text="MinIO, Garage, Backblaze B2, Wasabi, Cloudflare R2..." Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                  </ComboBoxItem>
+                </ComboBox>
+                <StackPanel x:Name="FolderPanel">
+                  <DockPanel>
+                    <Button x:Name="BtnBrowseDest" DockPanel.Dock="Right" Style="{StaticResource Btn}" Margin="8,0,0,0" Padding="14,8">
+                      <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Browse"/></StackPanel>
+                    </Button>
+                    <TextBox x:Name="DestBox" Style="{StaticResource Field}" FontFamily="Cascadia Mono, Consolas"/>
+                  </DockPanel>
+                  <WrapPanel x:Name="DestChips" Margin="0,10,0,0"/>
+                </StackPanel>
+                <StackPanel x:Name="CloudHost" Visibility="Collapsed"/>
                 <TextBlock x:Name="DestInfo" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource Muted}"/>
               </StackPanel>
             </Border>
@@ -885,6 +1158,9 @@
                   <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Load"/></StackPanel>
                 </Button>
               </StackPanel>
+              <Button x:Name="BtnLoadCloud" Style="{StaticResource Btn}" Margin="0,6,0,0" HorizontalContentAlignment="Center">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Load from a cloud account"/></StackPanel>
+              </Button>
               <WrapPanel x:Name="RestoreChips" Margin="0,8,0,0"/>
               <TextBlock x:Name="RestoreInfo" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,4,0,0"/>
               <TextBlock Text="OPTIONS" Style="{StaticResource SideLabel}"/>

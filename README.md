@@ -52,23 +52,39 @@ Requirements: Windows 10 or 11. winget (App Installer) is used when available; w
 1. **Apps:** the scan runs on its own. Click an app to see where its installer comes from. Apps tagged `manual` had no winget or Store package: pick one of the suggested matches or paste a direct download link.
 2. **App settings:** tick what to keep. Very large folders, like modpack instances and browser profiles, start unticked.
 3. **Extras:** turn on fonts, Wi-Fi, drivers or user folders as needed.
-4. **Backup:** choose a folder the reset won't wipe: a NAS share, a USB or second drive, or a OneDrive, Google Drive or Dropbox folder. Then press **Start backup**.
+4. **Backup:** pick where the backup goes from the list: a folder on a NAS share, USB or second drive; a synced folder on this PC; or a cloud account you sign in to (OneDrive, Google Drive, Dropbox, Nextcloud, any WebDAV server or S3-compatible storage). Then press **Start backup**.
 5. **Ready to reset:** when the backup finishes, a summary shows how every ticked app will come back (saved installer, online install, or manual action), which app settings and extras are included, and any problems, such as an installer file that's missing. The same check is saved in the backup as `Ready to reset.html`.
 
-### Backing up to OneDrive, Google Drive or Dropbox
+### Backing up to a cloud account
 
-WinPrestige recognises your OneDrive, Google Drive for desktop and Dropbox folders and offers them as destinations. It treats them as ordinary folders on this PC: it doesn't sign in to the service or upload anything itself. Your sync app does the uploading in the background.
+Choose **OneDrive**, **Google Drive** or **Dropbox** in the destination list and press the sign-in button. Your browser opens on the provider's own sign-in page; WinPrestige never sees your password, only a token that lets it use its own folder:
 
-That means a finished backup only proves the copy on this PC. Before you reset, open the service on the web (or on another device) and check the `WinPrestige Backup` folder is there and has finished syncing, then press **I've checked it's online**. WinPrestige can't see the upload status for you.
+- OneDrive: `Apps > WinPrestige` (it can't see the rest of your OneDrive)
+- Dropbox: `Apps > WinPrestige`
+- Google Drive: a `WinPrestige Backup` folder in My Drive (it can only see files it created)
 
-After the reset, sign in to the sync app again (OneDrive is built into Windows; install Google Drive for desktop or Dropbox), make the `WinPrestige Backup` folder available offline and let it download, then run `Restore.cmd` in it or pick it in WinPrestige. Keep enough cloud storage free for the backup; installers can take several gigabytes.
+For a home server, choose **Nextcloud** (you approve WinPrestige in the browser and Nextcloud gives it an app password you can revoke), **WebDAV server** (ownCloud, Synology's WebDAV Server package, QNAP, Seafile, pCloud, Koofr, Apache, Caddy, `rclone serve webdav`), or **S3-compatible storage** (MinIO, Garage, SeaweedFS, Ceph, Backblaze B2, Wasabi, Cloudflare R2, AWS S3). Self-signed certificates are fine: WinPrestige shows the certificate and asks before trusting it. Passwords, keys and tokens are stored encrypted for your Windows account in `%LOCALAPPDATA%\WinPrestige\cloud-accounts.json`, and **Sign out** forgets them. Each PC backs up to its own folder, such as `WinPrestige Backup/ALEX-PC`.
 
+The backup is built in a folder on this PC first (`%LOCALAPPDATA%\WinPrestige\Cloud`), so it needs the same free space as a normal backup. It's then uploaded, and WinPrestige lists the folder on the server again and compares every file's size and checksum with the copy on this PC. The Ready to reset card only says **Uploaded and verified** when every file checks out; otherwise it lists what didn't, and running the backup again sends just those. Later backups only upload what changed and remove what the backup no longer has. A plain WebDAV server that reports no checksums is checked by size, and a checksum list saved with the backup lets the restore check every file it downloads.
+
+After the reset, download WinPrestige from GitHub (or run it from a USB stick), open **Restore**, press **Load from a cloud account**, sign in again and pick your backup. It's downloaded to a second drive if there is one (or your user folder), every file is checked against the backup, and it's loaded as usual.
+
+OneDrive, Google Drive and Dropbox sign-in needs WinPrestige's app registration with each provider; see [docs/CLOUD-SETUP.md](docs/CLOUD-SETUP.md) if you build WinPrestige yourself.
+
+### Backing up to a synced folder
+
+**Synced folder on this PC** offers the folders your sync apps upload: OneDrive, Google Drive for desktop, Dropbox, iCloud Drive, Nextcloud and ownCloud desktop, Box, Synology Drive, Proton Drive, MEGA, pCloud Drive and Seafile. WinPrestige treats these as ordinary folders on this PC: it doesn't sign in or upload anything itself. Your sync app does the uploading in the background.
+
+That means a finished backup only proves the copy on this PC. Before you reset, open the service on the web (or on another device) and check the `WinPrestige Backup` folder is there and has finished syncing, then press **I've checked it's online**. WinPrestige can't see the upload status for you. If you want it checked, choose the cloud account instead.
+
+After the reset, sign in to the sync app again (OneDrive is built into Windows; install the others), make the `WinPrestige Backup` folder available offline and let it download, then run `Restore.cmd` in it or pick it in WinPrestige. Keep enough cloud storage free for the backup; installers can take several gigabytes.
 ## After the reset
 
 Either way works:
 
 - **Freshly downloaded WinPrestige:** it looks for backups on your other drives, USB drives, mapped network shares, and Desktop, Documents and Downloads. If it finds one, press **Restore everything**, or **Review first** to choose what to reinstall. If not, press **Find my backup...** and pick the folder, or drag the backup folder onto the window.
 - **From the backup itself:** open the backup folder on your NAS or external drive and double-click `Restore.cmd`.
+- **From a cloud account:** press **Load from a cloud account** on the Restore screen, sign in, and pick the backup.
 
 The restore runs in one batch:
 
