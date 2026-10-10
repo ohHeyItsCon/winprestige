@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Elgato Wave Link 3 settings are now backed up. Wave Link 3 installs as a Windows package and keeps your mixes and mic filter chains in `AppData\Local\Packages\Elgato.WaveLink_...\LocalState`; only the old Wave Link folder was saved before.
+- New **VST audio plugins** entry backs up `Common Files\VST3`, `VST2`, `CLAP` and the usual `VSTPlugins` folders and puts them back, so Wave Link filters, OBS and Voicemod find their plugins (ReaPlugs, Voxengo SPAN, Elgato's own filters and others that have no installer to save).
+- Installers winget can't download while WinPrestige runs as administrator (MSIX packages such as Wave Link 3 and Elgato Studio failed with "Access is denied") are now fetched from the same official URL in winget's manifest and kept only if the SHA-256 matches. Their package dependencies, such as Windows App Runtime and VCLibs, are saved too.
+- Restore installs packages shipped as a zip of MSIX files (how winget delivers VCLibs), and treats "a newer version is already installed" as done.
 ## 1.2.1
 
 - Fixed: app settings that include registry keys (7-Zip, Elgato Stream Deck, PuTTY and others) showed as failed after restoring, and their user-folder path fixes were skipped. The settings themselves were copied; `reg.exe` reports success on its error output, which the restore script mistook for a failure.

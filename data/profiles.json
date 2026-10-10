@@ -30,9 +30,24 @@
   {
     "id": "wavelink", "name": "Elgato Wave Link", "app": "^Elgato Wave Link$",
     "processes": ["WaveLink", "WaveLinkSE", "Elgato.WaveLink"], "services": ["WavelinkSEService"],
-    "items": [ { "path": "%APPDATA%\\Elgato\\WaveLink", "exclude": ["logs", "Downloads", "Marketplace", "*.cache"] } ],
+    "items": [
+      { "path": "%LOCALAPPDATA%\\Packages\\Elgato.WaveLink_g54w8ztgkx496\\LocalState", "include": ["Settings.json", "Backup", "AudioPluginCache"] },
+      { "path": "%APPDATA%\\Elgato\\WaveLink", "exclude": ["logs", "Downloads", "Marketplace", "*.cache"] }
+    ],
     "registry": ["HKCU\\Software\\Elgato Systems GmbH\\Wave Link"],
-    "notes": "Mixes, channel routing and app routing."
+    "rewrite": ["%LOCALAPPDATA%\\Packages\\Elgato.WaveLink_g54w8ztgkx496\\LocalState\\Settings.json"],
+    "notes": "Mixes, routing and mic filter chains, for Wave Link 3 (Microsoft Store style package) and older versions. The plugins your filters use are saved by the VST audio plugins entry."
+  },
+  {
+    "id": "vst-plugins", "name": "VST audio plugins",
+    "items": [
+      { "path": "%PROGRAMFILES%\\Common Files\\VST3" },
+      { "path": "%PROGRAMFILES%\\Common Files\\VST2" },
+      { "path": "%PROGRAMFILES%\\Common Files\\CLAP" },
+      { "path": "%PROGRAMFILES%\\VSTPlugins" },
+      { "path": "%PROGRAMFILES%\\Steinberg\\VSTPlugins" }
+    ],
+    "notes": "Audio plugins used by Wave Link filters, OBS, Voicemod and music apps, copied back into place. Free plugins work straight away; paid ones may ask you to sign in or activate again."
   },
   {
     "id": "elgato-camerahub", "name": "Elgato Camera Hub", "app": "^Elgato Camera Hub",

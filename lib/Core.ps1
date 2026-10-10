@@ -1154,6 +1154,24 @@ function Save-WPWingetInstaller {
     $bins = @(Get-ChildItem -LiteralPath $tmp -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.yaml' })
     if ($res.ExitCode -ne 0 -or $bins.Count -eq 0) {
         $err = Get-WPWingetError $res
+        # winget can't download some packages (MSIX ones in particular) when run as administrator
+        # and reports "Access is denied". Fetch the manifest's installer URL directly instead.
+        Get-ChildItem -LiteralPath $tmp -File -ErrorAction SilentlyContinue | ForEach-Object { [IO.File]::Delete($_.FullName) }
+        $direct = $null
+        try { $direct = Save-WPDirectInstaller $App $tmp } catch { $direct = $null }
+        if ($direct) {
+            if (Test-Path -LiteralPath $folder) { Remove-Item -LiteralPath $folder -Recurse -Force }
+            Move-Item -LiteralPath $tmp -Destination $folder
+            return @{
+                Status = 'Downloaded'; Folder = $FolderName; WingetId = $App.WingetId
+                Installer = $direct.Installer; Manifest = ''
+                Bytes = [long]$direct.Bytes; Version = $direct.Version
+                Type = $direct.Type; NestedType = ''; Silent = ''; SilentWithProgress = ''; Custom = ''
+                Dependencies = @($direct.Dependencies); Codes = @{}
+                InstallerUrl = $direct.InstallerUrl; PackageUrl = ''; Sha256 = $direct.Sha256
+                Date = (Get-Date).ToString('yyyy-MM-dd')
+            }
+        }
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
         if ($prevFilesOk) {
             $dl = ConvertTo-WPHashtable $prevDl
@@ -1178,6 +1196,46 @@ function Save-WPWingetInstaller {
         InstallerUrl = [string]$info.InstallerUrl; PackageUrl = [string]$info.PackageUrl; Sha256 = [string]$info.Sha256
         Date = (Get-Date).ToString('yyyy-MM-dd')
     }
+}
+
+function Save-WPDirectInstaller {
+    # Downloads the installer winget's manifest points at, and keeps it only if its SHA-256
+    # matches the manifest, the same check winget does. Returns $null if anything's off.
+    param($App, [string]$Directory)
+    $res = Invoke-WPWinget @('show', '--id', $App.WingetId, '--exact', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity') -TimeoutSec 180
+    if ($res.ExitCode -ne 0) { return $null }
+    $fields = @{}
+    $deps = @(); $depIndent = -1
+    foreach ($line in @($res.Lines)) {
+        if ($depIndent -ge 0) {
+            # Package ids listed under "- Package Dependencies:", indented deeper than that line.
+            $indent = $line.Length - $line.TrimStart().Length
+            if ($indent -gt $depIndent -and $line -match '^\s+([A-Za-z0-9][\w.+-]*)(\s|$)') { $deps += $Matches[1]; continue }
+            $depIndent = -1
+        }
+        if ($line -match '^(\s*)-\s*Package Dependencies:\s*$') { $depIndent = $Matches[1].Length; continue }
+        if ($line -match '^\s*(Version|Installer Type|Installer Url|Installer SHA256):\s*(\S+)\s*$') {
+            if (-not $fields.ContainsKey($Matches[1])) { $fields[$Matches[1]] = $Matches[2] }
+        }
+    }
+    $url = $fields['Installer Url']; $sha = $fields['Installer SHA256']
+    if (-not $url -or $url -notmatch '^https://' -or $sha -notmatch '^[0-9A-Fa-f]{64}$') { return $null }
+    $name = [Uri]::UnescapeDataString([IO.Path]::GetFileName(([Uri]$url).AbsolutePath))
+    $name = ($name -replace '[\\/:*?"<>|]', '_')
+    if (-not $name -or $name -notmatch '\.\w{2,10}$') { $name = (Get-WPSafeName (Get-WPCleanName $App.Name)) + '-setup.exe' }
+    $file = Join-Path $Directory $name
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    $ProgressPreference = 'SilentlyContinue'
+    Invoke-WebRequest -Uri $url -OutFile $file -UseBasicParsing -MaximumRedirection 10 -UserAgent 'Mozilla/5.0 WinPrestige' -ErrorAction Stop
+    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash -ne $sha.ToUpperInvariant()) {
+        [IO.File]::Delete($file)
+        return $null
+    }
+    $type = ([string]$fields['Installer Type']).ToLowerInvariant()
+    if (-not $type) {
+        $type = switch -Regex ($name) { '\.(msix|msixbundle|appx|appxbundle)$' { 'msix' } '\.msi$' { 'msi' } '\.zip$' { 'zip' } default { 'exe' } }
+    }
+    return @{ Installer = $name; Bytes = (Get-Item -LiteralPath $file).Length; Type = $type; Version = [string]$fields['Version']; InstallerUrl = $url; Sha256 = $sha; Dependencies = $deps }
 }
 
 function Save-WPUrlInstaller {
@@ -1751,6 +1809,35 @@ function Get-WPSilentArgs {
     return ''
 }
 
+function Get-WPAppxError {
+    # Add-AppxPackage refusing because the same or a newer version is already there isn't a failure.
+    param($ErrorRecord)
+    $msg = $ErrorRecord.Exception.Message
+    if ($msg -match '0x80073D06|0x80073CFB') { return $null }
+    return $msg
+}
+
+function Install-WPZippedAppx {
+    # winget ships some frameworks (VCLibs, UI.Xaml) as a zip with one folder per architecture.
+    param([string]$Zip, $Download)
+    $work = Join-Path $env:TEMP ('WinPrestige\' + (Get-WPSafeName ([string]$Download.Folder)) + '-unzipped')
+    if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
+    try { Expand-Archive -LiteralPath $Zip -DestinationPath $work -Force -ErrorAction Stop } catch { return $null }
+    $pkgs = @(Get-ChildItem -LiteralPath $work -Recurse -File | Where-Object { $_.Extension -match '^\.(msix|appx|msixbundle|appxbundle)$' })
+    if ($pkgs.Count -eq 0) { return $null }
+    $cpu = $env:PROCESSOR_ARCHITEW6432; if (-not $cpu) { $cpu = $env:PROCESSOR_ARCHITECTURE }
+    $arch = switch ($cpu) { 'AMD64' { 'x64' } 'ARM64' { 'arm64' } default { 'x86' } }
+    $mine = @($pkgs | Where-Object { $_.FullName -match ('\\' + $arch + '\\') -or $_.Name -match ('[._]' + $arch + '[._]') })
+    if ($mine.Count) { $pkgs = $mine }
+    $failed = @()
+    foreach ($p in $pkgs) {
+        try { Add-AppxPackage -Path $p.FullName -ErrorAction Stop }
+        catch { $why = Get-WPAppxError $_; if ($why) { $failed += "$($p.Name): $why" } }
+    }
+    if ($failed.Count -eq $pkgs.Count) { return @{ Done = $true; Ok = $false; Detail = $failed[0] } }
+    return @{ Done = $true; Ok = $true; Detail = $(if ($failed.Count) { "Installed $($pkgs.Count - $failed.Count) of $($pkgs.Count) packages" } else { 'Installed' }) }
+}
+
 function Start-WPLocalInstall {
     # Copies a saved installer to local temp (some installers misbehave when run from a network share)
     # and starts it without waiting. Finish with Complete-WPLocalInstall, or use Install-WPLocal to wait.
@@ -1758,7 +1845,10 @@ function Start-WPLocalInstall {
     $src = Join-Path $Folder $Download.Installer
     if (-not (Test-Path -LiteralPath $src)) { return @{ Done = $true; Ok = $false; Detail = 'Installer file is missing from the backup.' } }
     $type = ([string]$Download.Type).ToLowerInvariant()
-    if (@('zip', 'portable') -contains $type) { return @{ Done = $true; Ok = $false; Detail = 'Portable/zip package; installing it with winget instead.' } }
+    if (@('zip', 'portable') -contains $type) {
+        if ($type -eq 'zip') { $r = Install-WPZippedAppx $src $Download; if ($r) { return $r } }
+        return @{ Done = $true; Ok = $false; Detail = 'Portable/zip package; installing it with winget instead.' }
+    }
     $work = Join-Path $env:TEMP ('WinPrestige\' + (Get-WPSafeName ([string]$Download.Folder)))
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $file = Join-Path $work $Download.Installer
@@ -1767,7 +1857,11 @@ function Start-WPLocalInstall {
 
     if (@('msix', 'appx') -contains $type -or $file -match '\.(msix|msixbundle|appx|appxbundle)$') {
         try { Add-AppxPackage -Path $file -ForceApplicationShutdown -ErrorAction Stop; return @{ Done = $true; Ok = $true; Detail = 'Installed' } }
-        catch { return @{ Done = $true; Ok = $false; Detail = $_.Exception.Message } }
+        catch {
+            $why = Get-WPAppxError $_
+            if (-not $why) { return @{ Done = $true; Ok = $true; Detail = 'Already installed' } }
+            return @{ Done = $true; Ok = $false; Detail = $why }
+        }
     }
 
     $silent = ''

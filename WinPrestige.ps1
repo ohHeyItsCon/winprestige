@@ -2262,6 +2262,23 @@ function Update-WPRestoreSummary {
     Update-WPGroupChecks
 }
 
+function Set-WPRestoreOnly {
+    # Testing aid: tick only the restore items whose names match one of the semicolon-separated patterns.
+    param([string]$Patterns)
+    $pats = @($Patterns -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $names = @{}
+    foreach ($a in @($state.Restore.apps)) { $names[[string]$a.Key] = [string]$a.Name }
+    foreach ($c in @($state.Restore.configs)) { $names['config:' + $c.Id] = [string]$c.Name }
+    foreach ($x in @($state.Restore.extras)) { $names['extra:' + $x.Id] = [string]$x.Name }
+    foreach ($key in @($state.RRows.Keys)) {
+        $n = $names[$key]
+        $want = [bool]($n -and @($pats | Where-Object { $n -like $_ }).Count)
+        $state.RestoreSel[$key] = $want
+        $state.RRows[$key].Check.IsChecked = $want
+    }
+    Update-WPRestoreSummary
+}
+
 function Start-WPRestore {
     param([switch]$NoConfirm, $Progress)
     if (-not $state.Restore) { [void][System.Windows.MessageBox]::Show($window, 'Load a backup folder first.', 'WinPrestige'); return }
@@ -2592,7 +2609,11 @@ if ($Screenshot) {
             if (@('Backup', 'Restore') -contains $ScreenshotAction -and -not $state.ShotActionDone) {
                 $state.ShotActionDone = $true
                 if ($ScreenshotAction -eq 'Backup') { $ui.TabBackup.IsChecked = $true; Start-WPBackup }
-                else { $ui.TabRestore.IsChecked = $true; Start-WPRestore }
+                else {
+                    $ui.TabRestore.IsChecked = $true
+                    if ($ScreenshotSelect) { Set-WPRestoreOnly $ScreenshotSelect }
+                    Start-WPRestore
+                }
                 return
             }
             if (-not $state.ShotPrepared) {
@@ -2600,7 +2621,7 @@ if ($Screenshot) {
                 $ui["Tab$ScreenshotTab"].IsChecked = $true
                 $window.UpdateLayout()
                 switch ($ScreenshotTab) { 'Apps' { Update-WPAppLayout } 'Configs' { Update-WPConfigLayout } 'Restore' { Update-WPRestoreLayout } }
-                if ($ScreenshotSelect -and $ScreenshotAction -ne 'Drop') {
+                if ($ScreenshotSelect -and @('Drop', 'Restore') -notcontains $ScreenshotAction) {
                     $pick = $state.Apps | Where-Object { $_.Name -eq $ScreenshotSelect } | Select-Object -First 1
                     if ($pick) { Show-WPDetails $pick.Key }
                 }
