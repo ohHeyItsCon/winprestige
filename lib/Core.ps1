@@ -1726,6 +1726,77 @@ function Save-WPWingetInstaller {
     }
 }
 
+function ConvertTo-WPFrameworkId {
+    # The winget id for a framework package an MSIX depends on, or '' if winget doesn't carry it.
+    param([string]$Name)
+    switch -Regex ($Name) {
+        '^Microsoft\.VCLibs\.140\.00\.UWPDesktop$' { return 'Microsoft.VCLibs.Desktop.14' }
+        '^Microsoft\.WindowsAppRuntime\.\d+(\.\d+)?$' { return $Name }
+        '^Microsoft\.UI\.Xaml\.\d+\.\d+$' { return $Name }
+    }
+    return ''
+}
+
+function Get-WPAppxDependencies {
+    # The framework packages an MSIX says it needs, read from its own AppxManifest.xml. winget's
+    # manifest can lag behind the package: Wave Link 3.3 needs Windows App Runtime 2, winget lists 1.8.
+    # Returns $null if the package can't be read.
+    param([string]$Path)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $tmp = $null
+    $zip = $null
+    try {
+        $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+        $entry = $zip.GetEntry('AppxManifest.xml')
+        if (-not $entry) {
+            # A bundle: read the main package for this PC's architecture.
+            $cpu = $env:PROCESSOR_ARCHITEW6432; if (-not $cpu) { $cpu = $env:PROCESSOR_ARCHITECTURE }
+            $arch = switch ($cpu) { 'AMD64' { 'x64' } 'ARM64' { 'arm64' } default { 'x86' } }
+            $inner = @($zip.Entries | Where-Object { $_.Name -match '\.(msix|appx)$' -and $_.Name -notmatch '(scale|language|split)-' })
+            $pick = @($inner | Where-Object { $_.Name -match ('[._]' + $arch + '[._]') }) + @($inner | Where-Object { $_.Name -match '[._]neutral[._]' }) + $inner | Select-Object -First 1
+            if (-not $pick) { return $null }
+            $tmp = Join-Path $env:TEMP ('WinPrestige\appx-' + [Guid]::NewGuid().ToString('N') + '.msix')
+            New-Item -ItemType Directory -Path (Split-Path -Parent $tmp) -Force | Out-Null
+            [IO.Compression.ZipFileExtensions]::ExtractToFile($pick, $tmp, $true)
+            $zip.Dispose()
+            $zip = [IO.Compression.ZipFile]::OpenRead($tmp)
+            $entry = $zip.GetEntry('AppxManifest.xml')
+            if (-not $entry) { return $null }
+        }
+        $reader = New-Object IO.StreamReader($entry.Open())
+        try { [xml]$xml = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        return @($xml.SelectNodes("//*[local-name()='PackageDependency']") | ForEach-Object {
+                [pscustomobject]@{ Name = $_.GetAttribute('Name'); MinVersion = $_.GetAttribute('MinVersion') }
+            })
+    } catch {
+        return $null
+    } finally {
+        if ($zip) { $zip.Dispose() }
+        if ($tmp -and [IO.File]::Exists($tmp)) { [IO.File]::Delete($tmp) }
+    }
+}
+
+function Update-WPAppxDependencies {
+    # For a saved MSIX installer, replaces the frameworks winget listed with the ones the package
+    # itself asks for, so the backup carries what the restore really needs.
+    param($Download, [string]$Folder)
+    if (-not $Download -or -not $Download.Installer) { return }
+    if ([string]$Download.Installer -notmatch '\.(msix|msixbundle|appx|appxbundle)$') { return }
+    $file = Join-Path $Folder $Download.Installer
+    if (-not (Test-Path -LiteralPath $file)) { return }
+    $needs = Get-WPAppxDependencies $file
+    if ($null -eq $needs) { return }
+    $ids = @(); $unknown = @()
+    foreach ($n in @($needs)) {
+        $id = ConvertTo-WPFrameworkId $n.Name
+        if ($id) { $ids += $id } else { $unknown += $n.Name }
+    }
+    # Keep anything winget listed that isn't a framework package (e.g. a VC++ redistributable).
+    $kept = @($Download.Dependencies | Where-Object { $_ -and -not (ConvertTo-WPFrameworkId $_) })
+    $Download.Dependencies = @(@($kept) + @($ids) | Select-Object -Unique)
+    if ($unknown.Count) { Write-WPLog ("  {0} also needs {1}, which isn't saved in the backup (Windows usually installs it from the Store)." -f [IO.Path]::GetFileNameWithoutExtension($Download.Installer), ($unknown -join ', ')) 'info' }
+}
+
 function Save-WPDirectInstaller {
     # Downloads the installer winget's manifest points at, and keeps it only if its SHA-256
     # matches the manifest, the same check winget does. Returns $null if anything's off.
@@ -2005,6 +2076,7 @@ function Invoke-WPBackup {
             $app.Status = 'Downloading'; Send-WPMessage 'app' @{ Key = $app.Key }
             if ($app.CustomUrl) { $dl = Save-WPUrlInstaller $app "$dest\Installers" $folderName $p -Force:$Options.Redownload }
             else { $dl = Save-WPWingetInstaller $app "$dest\Installers" $folderName $p -Force:$Options.Redownload }
+            if ($dl.Folder) { Update-WPAppxDependencies $dl (Join-Path "$dest\Installers" $dl.Folder) }
             $entry.Download = $dl
             $app.Status = $dl.Status
             $app.Detail = [string]$dl.Error
@@ -2515,6 +2587,19 @@ function Install-WPEntry {
             if ($Options.PreferLocal -or -not $Entry.WingetId) {
                 $r = Install-WPLocal $dl (Join-Path $BackupRoot ("Installers\" + $dl.Folder)) -Interactive:$interactive
                 if ($r.Ok) { return $r }
+                # An MSIX can name a framework the backup didn't know about (older backups, or winget's
+                # manifest was out of date). Install it from the backup or winget, then try once more.
+                if ([string]$r.Detail -match 'Provide the framework "([^"]+)"') {
+                    $fw = ConvertTo-WPFrameworkId $Matches[1]
+                    if ($fw -and ($DepIndex[$fw] -or $script:WP.Winget)) {
+                        Write-WPLog "  $($Entry.Name) needs $($Matches[1]) first" 'info'
+                        Install-WPDependency $fw $BackupRoot $DepIndex $null
+                        $r = Install-WPLocal $dl (Join-Path $BackupRoot ("Installers\" + $dl.Folder)) -Interactive:$interactive
+                        if ($r.Ok) { return $r }
+                    } else {
+                        $r.Detail = "Needs the Windows component $($Matches[1]), which isn't in this backup. Run the backup again with this version of WinPrestige to save it, or install the app once winget is available. ($($r.Detail))"
+                    }
+                }
             }
             if ($Entry.WingetId -and $Options.OnlineFallback -and $script:WP.Winget) {
                 $why = $r.Detail
@@ -2875,6 +2960,9 @@ function Invoke-WPRestore {
                 if ($level -eq 'warn') { Write-WPLog ("{0} settings restored, but some files need a look (see above)" -f $c.Name) 'warn' }
                 elseif ($level -eq 'info') { Write-WPLog ("{0} settings were already in place" -f $c.Name) 'ok' }
                 else { Write-WPLog ("{0} settings restored" -f $c.Name) 'ok' }
+                # Settings are put back even when the app itself didn't install; say so, so it doesn't read as installed.
+                $appFailed = @($list | Where-Object { $c.App -and $_.Name -match $c.App -and $results[[string]$_.Key] -and $results[[string]$_.Key].Mk -eq 'failed' }) | Select-Object -First 1
+                if ($appFailed) { Write-WPLog ("  {0} itself didn't install, so these settings will be used once you install it." -f $appFailed.Name) 'warn' }
                 $cfgResults += [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = @{ warn = 'warn'; info = 'present'; ok = 'ok' }[$level]; Detail = $lastText }
                 if ($progress) { $progress.done[$key] = $(if ($level -eq 'info') { 'skipped' } else { 'ok' }); Save-WPRestoreProgress $progress }
             } catch {

@@ -2667,6 +2667,7 @@ function Import-WPBackup {
     $state.RestoreResult = $null
     $state.RRows = @{}
     $state.RestoreSel = @{}
+    Reset-WPGameQueue
     $apps = @($m.apps)
     foreach ($e in $apps) {
         if ($e.Category -eq 'system') { continue }
@@ -3153,14 +3154,36 @@ function Open-WPManualLinks {
     }
 }
 
+function Reset-WPGameQueue {
+    $state.GameQueue = $null
+    $state.GameQueueAt = 0
+    $ui.QueueGamesText.Text = 'Queue ticked games in Steam'
+}
+
 function Start-WPQueueGames {
+    # Opens Steam's install window for one game at a time. Steam replaces its open window when the next
+    # game arrives, so the button turns into "Next game" and waits for you to click Install first.
     if (-not $state.Restore) { return }
-    if ($Demo) { Set-WPStatus 'Demo mode: this opens a Steam install window for each ticked game.'; return }
-    $games = @($state.Restore.apps | Where-Object { $_.Category -eq 'games' -and $_.GameUri -and $state.RestoreSel[$_.Key] })
-    if ($games.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Tick the games you want in the Games group first.', 'WinPrestige'); return }
-    $ans = [System.Windows.MessageBox]::Show($window, "Steam opens an install window for each of the $($games.Count) games, one after another. Steam needs to be installed and signed in.`n`nContinue?", 'WinPrestige', 'OKCancel', 'Question')
-    if ($ans -ne 'OK') { return }
-    foreach ($g in $games) { Open-WPUrl $g.GameUri; Start-Sleep -Milliseconds 1500 }
+    if ($Demo) { Set-WPStatus 'Demo mode: this opens a Steam install window for each ticked game, one at a time.'; return }
+    if (-not $state.GameQueue) {
+        $games = @($state.Restore.apps | Where-Object { $_.Category -eq 'games' -and $_.GameUri -and $state.RestoreSel[$_.Key] })
+        if ($games.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Tick the games you want in the Games group first.', 'WinPrestige'); return }
+        $ans = [System.Windows.MessageBox]::Show($window, "Steam opens an install window for one game at a time ($($games.Count) in all). Steam needs to be installed and signed in.`n`nAfter you click Install in Steam, press `"Next game`" here for the next one.", 'WinPrestige', 'OKCancel', 'Question')
+        if ($ans -ne 'OK') { return }
+        $state.GameQueue = $games
+        $state.GameQueueAt = 0
+    }
+    $games = @($state.GameQueue)
+    $g = $games[$state.GameQueueAt]
+    $state.GameQueueAt++
+    Open-WPUrl $g.GameUri
+    if ($state.GameQueueAt -lt $games.Count) {
+        $ui.QueueGamesText.Text = "Next game: $($games[$state.GameQueueAt].Name) ($($state.GameQueueAt + 1) of $($games.Count))"
+        Set-WPStatus "Steam: click Install for $($g.Name), then press Next game."
+    } else {
+        Reset-WPGameQueue
+        Set-WPStatus "Steam: click Install for $($g.Name). That was the last of $($games.Count) games."
+    }
 }
 
 #endregion

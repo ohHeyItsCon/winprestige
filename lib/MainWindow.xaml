@@ -1182,7 +1182,7 @@
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open manual links"/></StackPanel>
               </Button>
               <Button x:Name="BtnQueueGames" Style="{StaticResource BtnGhost}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Queue ticked games in Steam"/></StackPanel>
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock x:Name="QueueGamesText" Text="Queue ticked games in Steam" TextWrapping="Wrap"/></StackPanel>
               </Button>
               <Button x:Name="BtnOpenRestoreReport" Style="{StaticResource BtnGhost}">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open report"/></StackPanel>

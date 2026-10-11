@@ -41,7 +41,14 @@ Write-Host "Built WinPrestige.exe $Version"
 
 $dist = Join-Path $root 'dist'
 $stage = Join-Path $dist 'WinPrestige'
-if (Test-Path -LiteralPath $dist) { Remove-Item -LiteralPath $dist -Recurse -Force }
+if (Test-Path -LiteralPath $dist) {
+    # Move it aside first: that fails cleanly if something has it open (WinPrestige or Windows Sandbox
+    # running from dist), where deleting in place would get partway and leave a broken copy.
+    $old = "$dist.old-$([Guid]::NewGuid().ToString('N').Substring(0, 8))"
+    try { Rename-Item -LiteralPath $dist -NewName (Split-Path -Leaf $old) -ErrorAction Stop }
+    catch { throw "dist is in use. Close WinPrestige and any Windows Sandbox running from dist, then build again." }
+    Remove-Item -LiteralPath $old -Recurse -Force
+}
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
 foreach ($name in @('WinPrestige.exe', 'WinPrestige.ps1', 'WinPrestige.cmd', 'README.md', 'LICENSE')) {
     Copy-Item -LiteralPath (Join-Path $root $name) -Destination $stage
