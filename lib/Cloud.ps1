@@ -150,7 +150,7 @@ function Set-WPCloudSecret {
 }
 
 function Get-WPCloudRemoteDir {
-    # Each PC gets its own folder under the account's root, e.g. "WinPrestige Backup/ALEX-PC".
+    # Each PC gets its own folder under the account's root, e.g. "WinPrestige Backup/USER-PC".
     param($Account, [string]$Computer = $env:COMPUTERNAME)
     $root = ([string]$Account.Root).Trim('/', ' ')
     if (-not $root) { $root = 'WinPrestige Backup' }

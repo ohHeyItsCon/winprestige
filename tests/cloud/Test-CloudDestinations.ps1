@@ -83,7 +83,7 @@ function Get-Tree($root) {
 $want = Get-Tree $stage
 
 $providers = @(
-    @{ Id = 'webdav'; Connect = { Connect-WPWebDav "$MockBase/dav/" 'alex' 'pw1' } }
+    @{ Id = 'webdav'; Connect = { Connect-WPWebDav "$MockBase/dav/" 'user' 'pw1' } }
     @{ Id = 'nextcloud'; Connect = { Connect-WPNextcloud "$MockBase/nc" } }
     @{ Id = 's3'; Connect = { $mock.FailNextS3Put = $true; Connect-WPS3 "$MockBase/s3" 'us-east-1' 'backups' 'AKTEST' 's3secret' $true } }
     @{ Id = 'onedrive'; Connect = { Connect-WPCloudOAuth 'onedrive' 30 } }

@@ -2021,7 +2021,7 @@ function Get-WPDestKind {
     return 'folder'
 }
 
-function Get-WPCloudComputer { if ($Demo) { return 'ALEX-PC' } return $env:COMPUTERNAME }
+function Get-WPCloudComputer { if ($Demo) { return 'USER-PC' } return $env:COMPUTERNAME }
 
 function New-WPCloudPanel {
     # Loads lib\CloudPanel.xaml into a host and returns its parts. Handlers find the panel via Tag.
@@ -3400,6 +3400,15 @@ if ($Screenshot) {
                 if ($ScreenshotSelect -match 'height=(\d+)') { $window.Height = [int]$Matches[1] }
                 $destTok = @($ScreenshotSelect -split ';' | Where-Object { $_ -like 'dest=*' }) | Select-Object -First 1
                 if ($destTok -and $ScreenshotAction -ne 'Backup') { $ui.DestBox.Text = $destTok.Substring(5); Update-WPDestInfo }
+                $rpTok = @($ScreenshotSelect -split ';' | Where-Object { $_ -like 'restorepath=*' }) | Select-Object -First 1
+                if ($rpTok) { $ui.RestorePath.Text = $rpTok.Substring(12) }
+                if ($Demo -and ($ScreenshotSelect -split ';') -contains 'fill' -and $script:BackupCloud) {
+                    # Example values so a promo can show a filled-in self-hosted form (demo screenshots only).
+                    $cp = $script:BackupCloud
+                    $cp.CpServer.Text = $(if ($cp.Provider -eq 's3') { 'https://minio.example.com:9000' } elseif ($cp.Provider -eq 'webdav') { 'https://nas.example.com:5006/home' } else { 'https://cloud.example.com' })
+                    $cp.CpRegion.Text = 'us-east-1'; $cp.CpBucket.Text = 'backups'; $cp.CpUser.Text = $(if ($cp.Provider -eq 's3') { 'winprestige' } else { 'user' })
+                    $cp.CpPass.Password = 'demo-secret-key-0000'
+                }
                 if (($ScreenshotSelect -split ';') -contains 'dropdown') { $ui.DestKind.IsDropDownOpen = $true }
                 if (($ScreenshotSelect -split ';') -contains 'restoredialog') { $ui.TabRestore.IsChecked = $true; Show-WPCloudRestore }
                 $window.UpdateLayout()

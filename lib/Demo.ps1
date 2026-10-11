@@ -5,7 +5,7 @@
   with the same progress messages the real ones send.
 #>
 
-$script:WPDemoUser = 'C:\Users\Alex'
+$script:WPDemoUser = 'C:\Users\User'
 
 function ConvertTo-WPDemoPath {
     param([string]$TokenPath)
@@ -289,7 +289,7 @@ function New-WPDemoDownload {
 }
 
 function Find-WPDemoBackups {
-    return @([pscustomobject]@{ Path = '\\NAS\Backups\WinPrestige Backup'; Computer = 'ALEX-PC'; Created = (Get-Date).AddDays(-1).ToString('s'); Apps = 65; Configs = 18 })
+    return @([pscustomobject]@{ Path = '\\NAS\Backups\WinPrestige Backup'; Computer = 'USER-PC'; Created = (Get-Date).AddDays(-1).ToString('s'); Apps = 65; Configs = 18 })
 }
 
 function Invoke-WPDemoBackup {
@@ -373,7 +373,7 @@ function Invoke-WPDemoBackup {
     }
     $manifest = [ordered]@{
         tool = 'WinPrestige'; version = $script:WP.Version; created = (Get-Date).ToString('s')
-        computer = 'ALEX-PC'; user = 'Alex'; userProfile = $script:WPDemoUser; windows = 'Microsoft Windows 11 Pro'
+        computer = 'USER-PC'; user = 'User'; userProfile = $script:WPDemoUser; windows = 'Microsoft Windows 11 Pro'
         apps = @($entries); dependencies = @(); configs = @($configEntries); extras = @($extraEntries)
         added = @('Telegram Desktop', 'Parsec'); removed = @('Skype (uninstalled)', 'CCleaner (uninstalled)')
     }
@@ -411,7 +411,7 @@ function Get-WPDemoManifest {
     )
     $m = [ordered]@{
         tool = 'WinPrestige'; version = $script:WP.Version; created = (Get-Date).AddDays(-1).ToString('s')
-        computer = 'ALEX-PC'; user = 'Alex'; userProfile = $script:WPDemoUser; windows = 'Microsoft Windows 11 Pro'
+        computer = 'USER-PC'; user = 'User'; userProfile = $script:WPDemoUser; windows = 'Microsoft Windows 11 Pro'
         apps = @($entries); dependencies = @(); configs = @($configs); extras = @($extras); added = @(); removed = @()
     }
     return ((ConvertTo-Json -InputObject $m -Depth 10) | ConvertFrom-Json)
@@ -530,15 +530,15 @@ function Invoke-WPDemoRestore {
 function Get-WPDemoCloudAccount {
     param([string]$Provider)
     $label = switch ($Provider) {
-        'onedrive' { 'alex.morgan@outlook.com' }
-        'googledrive' { 'alex.morgan@gmail.com' }
-        'dropbox' { 'alex.morgan@outlook.com' }
-        'nextcloud' { 'Alex on cloud.morgan.home' }
-        'webdav' { 'alex on nas.morgan.home' }
-        default { 'winprestige on minio.morgan.home' }
+        'onedrive' { 'user@example.com' }
+        'googledrive' { 'user@example.com' }
+        'dropbox' { 'user@example.com' }
+        'nextcloud' { 'User Name on cloud.example.com' }
+        'webdav' { 'user on nas.example.com' }
+        default { 'winprestige on minio.example.com' }
     }
     $free = switch ($Provider) { 'onedrive' { 1011GB } 'googledrive' { 1.8TB } 'dropbox' { 1.7TB } default { 3.4TB } }
-    $acct = New-WPCloudAccountObject $Provider @{ Label = $label; Free = [long]$free; Server = 'https://cloud.morgan.home'; Bucket = 'backups'; Endpoint = 'https://minio.morgan.home:9000' }
+    $acct = New-WPCloudAccountObject $Provider @{ Label = $label; Free = [long]$free; Server = 'https://cloud.example.com'; Bucket = 'backups'; Endpoint = 'https://minio.example.com:9000' }
     $acct.Id = "demo-$Provider"
     return $acct
 }
@@ -546,7 +546,7 @@ function Get-WPDemoCloudAccount {
 function Invoke-WPDemoCloudUpload {
     param($Account)
     $prov = Get-WPCloudProvider $Account.Provider
-    $dir = Get-WPCloudRemoteDir $Account 'ALEX-PC'
+    $dir = Get-WPCloudRemoteDir $Account 'USER-PC'
     $where = Get-WPCloudWhere $Account $dir
     Write-WPLog "Uploading to $($prov.Name): $where" 'step'
     $files = 1284; $bytes = [long](14.2GB)
@@ -571,7 +571,7 @@ function Invoke-WPDemoCloudUpload {
 }
 
 function Find-WPDemoCloudBackups {
-    return @([pscustomobject]@{ Dir = 'WinPrestige Backup/ALEX-PC'; Computer = 'ALEX-PC'; Created = (Get-Date).AddDays(-1).Date.AddHours(21).AddMinutes(14).ToString('s'); Apps = 65; Configs = 18 })
+    return @([pscustomobject]@{ Dir = 'WinPrestige Backup/USER-PC'; Computer = 'USER-PC'; Created = (Get-Date).AddDays(-1).Date.AddHours(21).AddMinutes(14).ToString('s'); Apps = 65; Configs = 18 })
 }
 
 function Invoke-WPDemoCloudDownload {

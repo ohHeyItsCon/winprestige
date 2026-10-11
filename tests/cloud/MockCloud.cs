@@ -75,7 +75,7 @@ public class MockCloud
         try
         {
             if (path.StartsWith("/oauth/")) OAuth(c);
-            else if (path.StartsWith("/dav/")) Dav(c, "/dav/", "dav", "alex", "pw1");
+            else if (path.StartsWith("/dav/")) Dav(c, "/dav/", "dav", "user", "pw1");
             else if (path.StartsWith("/nc/")) Nextcloud(c);
             else if (path.StartsWith("/s3/")) S3(c);
             else if (path.StartsWith("/graph/")) Graph(c);
@@ -204,25 +204,25 @@ public class MockCloud
         if (p == "/nc/login/v2/poll")
         {
             var f = ParseForm(Encoding.UTF8.GetString(Read(c.Request)));
-            if (ncGranted && f.ContainsKey("token") && f["token"] == "tok1") Json(c, 200, "{\"server\":\"" + Base + "/nc\",\"loginName\":\"alex@example.com\",\"appPassword\":\"app-pw\"}");
+            if (ncGranted && f.ContainsKey("token") && f["token"] == "tok1") Json(c, 200, "{\"server\":\"" + Base + "/nc\",\"loginName\":\"user@example.com\",\"appPassword\":\"app-pw\"}");
             else Send(c, 404, "[]", "application/json", null);
             return;
         }
-        var want = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("alex@example.com:app-pw"));
-        var want2 = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("alex:app-pw"));
+        var want = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("user@example.com:app-pw"));
+        var want2 = "Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes("user:app-pw"));
         var auth = c.Request.Headers["Authorization"];
         if (p == "/nc/ocs/v2.php/cloud/user")
         {
             if (auth != want && auth != want2) { Send(c, 401, "", null, null); return; }
             if (c.Request.Headers["OCS-APIRequest"] != "true") { Send(c, 400, "need OCS header", null, null); return; }
-            Json(c, 200, "{\"ocs\":{\"data\":{\"id\":\"alex\",\"email\":\"alex@example.com\",\"displayname\":\"Alex\",\"quota\":{\"free\":500000000000,\"total\":1000000000000}}}}");
+            Json(c, 200, "{\"ocs\":{\"data\":{\"id\":\"user\",\"email\":\"user@example.com\",\"displayname\":\"User Name\",\"quota\":{\"free\":500000000000,\"total\":1000000000000}}}}");
             return;
         }
-        if (p.StartsWith("/nc/remote.php/dav/files/alex/") || p == "/nc/remote.php/dav/files/alex") { Dav(c, "/nc/remote.php/dav/files/alex/", "nc", "alex", "app-pw"); return; }
-        if (p.StartsWith("/nc/remote.php/dav/uploads/alex/"))
+        if (p.StartsWith("/nc/remote.php/dav/files/user/") || p == "/nc/remote.php/dav/files/user") { Dav(c, "/nc/remote.php/dav/files/user/", "nc", "user", "app-pw"); return; }
+        if (p.StartsWith("/nc/remote.php/dav/uploads/user/"))
         {
             if (auth != want2) { Send(c, 401, "", null, null); return; }
-            string rest = p.Substring("/nc/remote.php/dav/uploads/alex/".Length);
+            string rest = p.Substring("/nc/remote.php/dav/uploads/user/".Length);
             string id = rest.Split('/')[0];
             string m = c.Request.HttpMethod;
             lock (gate)
@@ -233,7 +233,7 @@ public class MockCloud
                 if (m == "MOVE")
                 {
                     var dest = new Uri(c.Request.Headers["Destination"]).AbsolutePath;
-                    string rel = Uri.UnescapeDataString(dest.Substring("/nc/remote.php/dav/files/alex/".Length)).Trim('/');
+                    string rel = Uri.UnescapeDataString(dest.Substring("/nc/remote.php/dav/files/user/".Length)).Trim('/');
                     var all = chunks[id].Values.SelectMany(x => x).ToArray();
                     if (c.Request.Headers["OC-Total-Length"] != all.Length.ToString()) { Send(c, 400, "length mismatch", null, null); return; }
                     files["nc:" + rel] = all;
@@ -355,7 +355,7 @@ public class MockCloud
         }
         if (p.StartsWith("/graph/dl/")) { byte[] b; lock (gate) files.TryGetValue("od:" + Uri.UnescapeDataString(p.Substring(10)), out b); if (c.Request.Headers["Authorization"] != null) { Send(c, 400, "no auth on download urls", null, null); return; } if (b == null) Send(c, 404, "", null, null); else SendBytes(c, b); return; }
         if (!Bearer(c)) return;
-        if (p == "/graph/v1.0/me") { Json(c, 200, "{\"displayName\":\"Alex\",\"userPrincipalName\":\"alex@outlook.com\",\"mail\":null}"); return; }
+        if (p == "/graph/v1.0/me") { Json(c, 200, "{\"displayName\":\"User Name\",\"userPrincipalName\":\"user@example.com\",\"mail\":null}"); return; }
         if (p == "/graph/v1.0/me/drive") { Json(c, 200, "{\"quota\":{\"remaining\":900000000000,\"total\":1099511627776}}"); return; }
         const string root = "/graph/v1.0/me/drive/special/approot";
         if (!p.StartsWith(root)) { Json(c, 404, "{}"); return; }
@@ -420,7 +420,7 @@ public class MockCloud
         var q = c.Request.QueryString;
         lock (gate)
         {
-            if (p == "/gd/drive/v3/about") { Json(c, 200, "{\"user\":{\"emailAddress\":\"alex@gmail.com\",\"displayName\":\"Alex\"},\"storageQuota\":{\"limit\":\"16106127360\",\"usage\":\"1000\"}}"); return; }
+            if (p == "/gd/drive/v3/about") { Json(c, 200, "{\"user\":{\"emailAddress\":\"user@example.com\",\"displayName\":\"User Name\"},\"storageQuota\":{\"limit\":\"16106127360\",\"usage\":\"1000\"}}"); return; }
             if (p == "/gd/drive/v3/files" && m == "GET")
             {
                 var qq = q["q"];
@@ -482,7 +482,7 @@ public class MockCloud
         if (arg != null && Regex.IsMatch(arg, "[^\\x20-\\x7E]")) { Json(c, 400, "{\"error_summary\":\"non-ascii header\"}"); return; }
         lock (gate)
         {
-            if (p == "/dbx/2/users/get_current_account") { if (c.Request.ContentType != null) { Json(c, 400, "{\"error_summary\":\"no body expected\"}"); return; } Json(c, 200, "{\"email\":\"alex@dropbox.test\",\"name\":{\"display_name\":\"Alex\"}}"); return; }
+            if (p == "/dbx/2/users/get_current_account") { if (c.Request.ContentType != null) { Json(c, 400, "{\"error_summary\":\"no body expected\"}"); return; } Json(c, 200, "{\"email\":\"user@example.com\",\"name\":{\"display_name\":\"User Name\"}}"); return; }
             if (p == "/dbx/2/users/get_space_usage") { Json(c, 200, "{\"used\":1000,\"allocation\":{\".tag\":\"individual\",\"allocated\":2147483648}}"); return; }
             if (p == "/dbx/2/files/list_folder" || p == "/dbx/2/files/list_folder/continue")
             {
