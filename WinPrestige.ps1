@@ -686,7 +686,13 @@ $timer.Add_Tick({
             # Drain anything the job queued just before finishing.
             while ($sync.Queue.TryDequeue([ref]$msg)) { try { Invoke-WPMessage $msg } catch { } }
             Set-WPBusy
-            if ($err) { Add-WPLogLine ("{0} stopped: {1}" -f $job.Name, $err.Message) 'error' }
+            if ($err) {
+                # Sign-in throws short codes for the panel to explain; say them in words here too.
+                $why = [string]$err.Message
+                if ($why -match '^NOAPP:(\w+)') { $why = "WinPrestige isn't registered with $((Get-WPCloudProvider $Matches[1]).Name) yet (no app ID in data\cloud-apps.json)." }
+                elseif ($why -match '^CERT:([0-9A-Fa-f]+)') { $why = "the server's certificate isn't trusted by Windows ($($Matches[1]))." }
+                Add-WPLogLine ("{0} stopped: {1}" -f $job.Name, $why) 'error'
+            }
             elseif ($state.Jobs.Count -eq 0) { Set-WPStatus 'Ready' }
             if ($job.OnDone) {
                 try { & $job.OnDone $result $err } catch { Add-WPLogLine ("Error: " + $_.Exception.Message) 'error' }
@@ -853,6 +859,7 @@ function Set-WPAppSelected {
     if (-not $a) { return }
     $a.Selected = $Value
     $state.Settings.Selections[$Key] = $Value
+    Update-WPAppConfigs @($a)
     Save-WPSettings
     Update-WPAppRow $a
     Update-WPAppSummary
@@ -866,12 +873,15 @@ function Set-WPGroupSelection {
     $parts = $Tag -split '\|'
     $page = $parts[0]; $group = $parts[1]; $value = $parts[2] -eq '1'
     if ($page -eq 'apps') {
+        $changed = @()
         foreach ($a in $state.Apps) {
             if ($a.Category -ne $group -or -not (Test-WPFilter @($a.Name, $a.WingetId, $a.Publisher))) { continue }
+            if ([bool]$a.Selected -ne $value) { $changed += $a }
             $a.Selected = $value
             $state.Settings.Selections[$a.Key] = $value
             Update-WPAppRow $a
         }
+        Update-WPAppConfigs $changed
         Save-WPSettings
         Update-WPAppSummary
         Update-WPBackupStats
@@ -907,6 +917,7 @@ function Set-WPAppsFromScan {
         }
         New-WPAppRow $a
     }
+    if (@($state.Configs).Count) { Sync-WPConfigsWithApps; Update-WPConfigSummary }
     Update-WPAppLayout
     if ($state.DetailKey -and -not $state.AppIndex[$state.DetailKey]) { $state.DetailKey = $null }
     Show-WPDetails $state.DetailKey
@@ -1131,7 +1142,7 @@ function Set-WPCustomUrl {
         return
     }
     $a.CustomUrl = $Url
-    if ($Url) { $state.Settings.CustomUrls[$Key] = $Url; if (-not $a.Selected) { $a.Selected = $true; $state.Settings.Selections[$Key] = $true } }
+    if ($Url) { $state.Settings.CustomUrls[$Key] = $Url; if (-not $a.Selected) { $a.Selected = $true; $state.Settings.Selections[$Key] = $true; Update-WPAppConfigs @($a) } }
     else { $state.Settings.CustomUrls.Remove($Key) }
     Save-WPSettings
     Update-WPAppRow $a
@@ -1141,11 +1152,15 @@ function Set-WPCustomUrl {
 }
 
 function Set-WPRecommendedApps {
+    $changed = @()
     foreach ($a in $state.Apps) {
+        $was = [bool]$a.Selected
         $state.Settings.Selections.Remove($a.Key)
         Set-WPDefaultSelection $a @{}
+        if ([bool]$a.Selected -ne $was) { $changed += $a }
         Update-WPAppRow $a
     }
+    Update-WPAppConfigs $changed
     Save-WPSettings
     Update-WPAppLayout
     Update-WPBackupStats
@@ -1153,13 +1168,16 @@ function Set-WPRecommendedApps {
 
 function Set-WPAllShownApps {
     param([bool]$Value)
+    $changed = @()
     foreach ($g in @(Get-WPVisibleAppGroups)) {
         foreach ($a in $g.Items) {
+            if ([bool]$a.Selected -ne $Value) { $changed += $a }
             $a.Selected = $Value
             $state.Settings.Selections[$a.Key] = $Value
             Update-WPAppRow $a
         }
     }
+    Update-WPAppConfigs $changed
     Save-WPSettings
     Update-WPAppLayout
     Update-WPBackupStats
@@ -1340,6 +1358,50 @@ function Update-WPConfigSummary {
     )
 }
 
+function Test-WPConfigDefault {
+    # Private data (passwords, keys, sign-ins) and very large folders start unticked.
+    param($Cfg)
+    return (-not $Cfg.Sensitive) -and $Cfg.Bytes -lt 1GB
+}
+
+function Get-WPConfigApps {
+    # The scanned apps a settings entry belongs to, from its profile's app pattern. Entries without
+    # one (SSH keys, folders you added) or whose app isn't installed stand on their own.
+    param($Cfg)
+    if (-not $Cfg.App) { return @() }
+    return @($state.Apps | Where-Object { $_.Name -match $Cfg.App } | Sort-Object { $_.Name.Length })
+}
+
+function Sync-WPConfigsWithApps {
+    # Settings follow their app: an unticked app's settings are unticked, and a ticked app's settings
+    # are ticked unless you unticked them (or they start unticked, see Test-WPConfigDefault).
+    param([object[]]$Configs = $state.Configs)
+    foreach ($c in @($Configs)) {
+        if (-not $c) { continue }
+        $apps = @(Get-WPConfigApps $c)
+        if (-not $apps.Count) { continue }
+        if (-not @($apps | Where-Object { $_.Selected }).Count) { $c.Selected = $false }
+        elseif ($state.Settings.ConfigSelections.ContainsKey($c.Id)) { $c.Selected = [bool]$state.Settings.ConfigSelections[$c.Id] }
+        else { $c.Selected = Test-WPConfigDefault $c }
+        Update-WPConfigCard $c
+    }
+}
+
+function Update-WPAppConfigs {
+    # Called after apps are ticked or unticked. Ticking an app ticks its settings again, even ones
+    # you unticked before; unticking it unticks them.
+    param([object[]]$Apps)
+    if (-not @($Apps).Count -or -not @($state.Configs).Count) { return }
+    $linked = @($state.Configs | Where-Object { $c = $_; $c.App -and @($Apps | Where-Object { $_.Name -match $c.App }).Count })
+    if (-not $linked.Count) { return }
+    foreach ($c in $linked) {
+        if ($state.Settings.ConfigSelections.ContainsKey($c.Id) -and -not $state.Settings.ConfigSelections[$c.Id] -and
+            @(Get-WPConfigApps $c | Where-Object { $_.Selected }).Count) { $state.Settings.ConfigSelections.Remove($c.Id) }
+    }
+    Sync-WPConfigsWithApps $linked
+    Update-WPConfigSummary
+}
+
 function Set-WPConfigs {
     param([object[]]$Configs)
     $state.Configs = @($Configs | Where-Object { $_ })
@@ -1348,11 +1410,31 @@ function Set-WPConfigs {
     foreach ($c in $state.Configs) {
         $state.ConfigIndex[$c.Id] = $c
         if ($state.Settings.ConfigSelections.ContainsKey($c.Id)) { $c.Selected = [bool]$state.Settings.ConfigSelections[$c.Id] }
-        else { $c.Selected = (-not $c.Sensitive) -and $c.Bytes -lt 1GB }
+        else { $c.Selected = Test-WPConfigDefault $c }
         New-WPConfigCard $c
     }
+    Sync-WPConfigsWithApps
     Update-WPConfigLayout
     Update-WPBackupStats
+}
+
+function Add-WPConfigApps {
+    # Ticking an app's settings adds the app to the backup too.
+    param([object[]]$Configs)
+    $add = @()
+    foreach ($c in @($Configs)) {
+        $apps = @(Get-WPConfigApps $c)
+        if ($apps.Count -and -not @($apps | Where-Object { $_.Selected }).Count) { $add += $apps[0] }
+    }
+    if (-not $add.Count) { return }
+    foreach ($a in $add) {
+        $a.Selected = $true
+        $state.Settings.Selections[$a.Key] = $true
+        Update-WPAppRow $a
+    }
+    Update-WPAppConfigs $add
+    Update-WPAppSummary
+    if ($ui.ShowSelectedOnly.IsChecked) { Update-WPAppLayout }
 }
 
 function Set-WPConfigSelected {
@@ -1361,6 +1443,7 @@ function Set-WPConfigSelected {
     if (-not $c) { return }
     $c.Selected = $Value
     $state.Settings.ConfigSelections[$Id] = $Value
+    if ($Value) { Add-WPConfigApps @($c) }
     Save-WPSettings
     Update-WPConfigCard $c
     Update-WPConfigSummary
@@ -1372,13 +1455,15 @@ function Set-WPAllConfigs {
     foreach ($c in $state.Configs) {
         if ($How -eq 'recommended') {
             $state.Settings.ConfigSelections.Remove($c.Id)
-            $c.Selected = (-not $c.Sensitive) -and ($c.Bytes -lt 1GB)
+            $c.Selected = Test-WPConfigDefault $c
         } else {
             $c.Selected = ($How -eq 'all')
             $state.Settings.ConfigSelections[$c.Id] = $c.Selected
         }
         Update-WPConfigCard $c
     }
+    if ($How -eq 'all') { Add-WPConfigApps $state.Configs }
+    else { Sync-WPConfigsWithApps }
     Save-WPSettings
     Update-WPConfigSummary
     Update-WPBackupStats

@@ -219,8 +219,8 @@ function Get-WPDemoConfigs {
         $c.Registry = @($d[5])
         $c.Running = @($d[6])
         $c.Sensitive = [bool]$d[7]
-        if ($prof) { $c.Notes = [string]$prof.notes; $c.Processes = @($prof.processes); $c.Services = @($prof.services | Where-Object { $_ }) }
-        if ($d[0] -eq 'obs-media') { $c.Notes = 'Images, videos and sounds your scenes use, put back at the same paths (3 files or folders).' }
+        if ($prof) { $c.App = [string]$prof.app; $c.Notes = [string]$prof.notes; $c.Processes = @($prof.processes); $c.Services = @($prof.services | Where-Object { $_ }) }
+        if ($d[0] -eq 'obs-media') { $c.App = '^OBS Studio'; $c.Notes = 'Images, videos and sounds your scenes use, put back at the same paths (3 files or folders).' }
         $c.Selected = (-not $c.Sensitive) -and $c.Bytes -lt 1GB
         $c | Add-Member -NotePropertyName SizeChecked -NotePropertyValue $true -Force
         $list += $c

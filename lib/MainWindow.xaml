@@ -993,6 +993,8 @@
                 <StackPanel x:Name="ConfigSummary"/>
               </Border>
               <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,10,0,0"
+                         Text="Settings follow the apps you tick on the Apps tab: untick any you don't need, and ticking an app's settings adds the app too."/>
+              <TextBlock Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="4,8,0,0"
                          Text="Each app's settings get their own folder in the backup, with a Restore-Config.cmd that puts them back after you reinstall the app."/>
             </StackPanel>
           </ScrollViewer>
