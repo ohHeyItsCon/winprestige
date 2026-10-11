@@ -124,6 +124,8 @@ You can rehearse a restore in [Windows Sandbox](https://learn.microsoft.com/wind
 
 The sandbox opens with your backup mapped in read-only and WinPrestige on the Restore screen. Tick a few apps that have a saved installer, plus their settings, and press **Start restore**. Then open those apps in the sandbox and check your settings are there. winget and the Microsoft Store don't work inside the sandbox, and hardware apps can't see your devices there, so test those on the real PC.
 
+The sandbox can only map folders on this PC's own drives. For a backup on a NAS or in a cloud account, run the script without `-BackupPath`, press **Load from a cloud account** inside the sandbox, and download the backup there.
+
 ## What's in a backup
 
 | Path | Contents |

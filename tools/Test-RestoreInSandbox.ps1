@@ -17,12 +17,19 @@
   an installer saved in the backup will install there. Hardware apps (fan, RGB, mouse
   software) can't see your devices from inside the sandbox, so test those on the real PC.
 
+  Leave out -BackupPath to try "Load from a cloud account" instead: the sandbox has its own
+  internet connection and browser, so you can sign in there and download a cloud backup.
+
 .EXAMPLE
   .\tools\Test-RestoreInSandbox.ps1 -BackupPath 'D:\WinPrestige Backup'
+
+.EXAMPLE
+  .\tools\Test-RestoreInSandbox.ps1
+  Opens the Restore page with no backup loaded, to test downloading one from a cloud account.
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][string]$BackupPath,
+    [string]$BackupPath,
     [string]$AppPath,
     [int]$MemoryMB = 0
 )
@@ -37,15 +44,18 @@ if (-not (Test-Path -LiteralPath $sandboxExe)) {
     exit 1
 }
 
-$backup = (Resolve-Path -LiteralPath $BackupPath).ProviderPath.TrimEnd('\')
-if (-not (Test-Path -LiteralPath (Join-Path $backup 'manifest.json'))) {
-    $inner = Join-Path $backup 'WinPrestige Backup'
-    if (Test-Path -LiteralPath (Join-Path $inner 'manifest.json')) { $backup = $inner }
-    else { throw "$backup isn't a WinPrestige backup (there's no manifest.json in it)." }
-}
-$drive = New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($backup))
-if ($backup.StartsWith('\\') -or $drive.DriveType -eq 'Network') {
-    throw "Windows Sandbox can only map folders on this PC's own drives. Copy the backup to a local drive first."
+$backup = $null
+if ($BackupPath) {
+    $backup = (Resolve-Path -LiteralPath $BackupPath).ProviderPath.TrimEnd('\')
+    if (-not (Test-Path -LiteralPath (Join-Path $backup 'manifest.json'))) {
+        $inner = Join-Path $backup 'WinPrestige Backup'
+        if (Test-Path -LiteralPath (Join-Path $inner 'manifest.json')) { $backup = $inner }
+        else { throw "$backup isn't a WinPrestige backup (there's no manifest.json in it)." }
+    }
+    $drive = New-Object IO.DriveInfo ([IO.Path]::GetPathRoot($backup))
+    if ($backup.StartsWith('\\') -or $drive.DriveType -eq 'Network') {
+        throw "Windows Sandbox can only map folders on this PC's own drives. Copy the backup to a local drive first, or leave out -BackupPath and load it from a cloud account inside the sandbox."
+    }
 }
 
 $app = (Resolve-Path -LiteralPath $AppPath).ProviderPath.TrimEnd('\')
@@ -58,17 +68,24 @@ if ($MemoryMB -le 0) {
 }
 
 $esc = { param($s) [Security.SecurityElement]::Escape($s) }
-$command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\WinPrestige\WinPrestige.ps1" -Mode Restore -BackupPath "C:\Backup"'
-$wsb = @"
-<Configuration>
-  <MemoryInMB>$MemoryMB</MemoryInMB>
-  <MappedFolders>
+$command = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\WinPrestige\WinPrestige.ps1" -Mode Restore'
+$backupMap = ''
+if ($backup) {
+    $command += ' -BackupPath "C:\Backup"'
+    $backupMap = @"
     <MappedFolder>
       <HostFolder>$(& $esc $backup)</HostFolder>
       <SandboxFolder>C:\Backup</SandboxFolder>
       <ReadOnly>true</ReadOnly>
     </MappedFolder>
-    <MappedFolder>
+
+"@
+}
+$wsb = @"
+<Configuration>
+  <MemoryInMB>$MemoryMB</MemoryInMB>
+  <MappedFolders>
+$backupMap    <MappedFolder>
       <HostFolder>$(& $esc $app)</HostFolder>
       <SandboxFolder>C:\WinPrestige</SandboxFolder>
       <ReadOnly>true</ReadOnly>
@@ -82,7 +99,12 @@ $wsb = @"
 $file = Join-Path $env:TEMP 'WinPrestige-Sandbox.wsb'
 [IO.File]::WriteAllText($file, $wsb, (New-Object Text.UTF8Encoding $false))
 
-Write-Host "Starting Windows Sandbox with $backup (read-only) and WinPrestige from $app."
-Write-Host 'In the sandbox: untick everything, tick a few apps with a saved installer and their settings, press Restore.'
+if ($backup) {
+    Write-Host "Starting Windows Sandbox with $backup (read-only) and WinPrestige from $app."
+    Write-Host 'In the sandbox: untick everything, tick a few apps with a saved installer and their settings, press Start restore.'
+} else {
+    Write-Host "Starting Windows Sandbox with WinPrestige from $app and no backup loaded."
+    Write-Host 'In the sandbox: press "Load from a cloud account", sign in, pick your backup and download it, then restore a few apps.'
+}
 Write-Host 'Then open those apps and check your settings are there. Close the sandbox to throw it all away.'
 Start-Process -FilePath $file
