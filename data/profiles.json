@@ -36,7 +36,7 @@
     ],
     "registry": ["HKCU\\Software\\Elgato Systems GmbH\\Wave Link"],
     "rewrite": ["%LOCALAPPDATA%\\Packages\\Elgato.WaveLink_g54w8ztgkx496\\LocalState\\Settings.json"],
-    "notes": "Mixes, routing and mic filter chains, for Wave Link 3 (Microsoft Store style package) and older versions. The plugins your filters use are saved by the VST audio plugins entry."
+    "notes": "Mixes, routing and mic filter chains, for Wave Link 3 (Microsoft Store style package) and older versions. The plugins your filters use are saved by the VST audio plugins entry. After the restore, open Wave Link once: it downloads its audio driver itself (WinPrestige can't save it), then asks you to restart."
   },
   {
     "id": "vst-plugins", "name": "VST audio plugins",
