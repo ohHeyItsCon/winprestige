@@ -3403,7 +3403,8 @@ $window.Add_Closing({
             $names = ($state.Jobs | ForEach-Object { $_.Name }) -join ', '
             $ans = [System.Windows.MessageBox]::Show($window, "$names is still running. Stop it and close WinPrestige?", 'WinPrestige', 'YesNo', 'Question')
             if ($ans -ne 'Yes') { $e.Cancel = $true; return }
-            $sync.Cancel = $true
+            # Stops cloud transfers and a browser sign-in that's still waiting, so the process exits and frees its port.
+            Stop-WPJobs
         }
         Save-WPSettings
     })

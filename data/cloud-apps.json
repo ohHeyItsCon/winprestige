@@ -10,7 +10,7 @@
     "redirect": "http://127.0.0.1"
   },
   "dropbox": {
-    "appKey": "",
-    "redirect": "http://127.0.0.1:47615/"
+    "appKey": "1z9d9oqyh15jz4l",
+    "redirect": "http://localhost:47615/"
   }
 }

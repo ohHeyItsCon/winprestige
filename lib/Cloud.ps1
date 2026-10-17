@@ -317,9 +317,14 @@ function Connect-WPCloudOAuth {
         'dropbox' { $q.token_access_type = 'offline' }
     }
     $url = $app.authorizeUrl + '?' + (ConvertTo-WPForm $q)
+    # Check the answer can be caught before sending you to the browser.
+    $busy = "Port $port on this PC is in use, probably by another WinPrestige window still waiting for a sign-in. Close it, or wait up to 5 minutes, then try again."
+    try { $probe = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, $port); $probe.Start(); $probe.Stop() } catch { throw $busy }
+    [WinPrestige.CloudHttp]::Cancel = $false
     Write-WPLog "Opening $($prov.Name) sign-in in your browser..." 'step'
     Open-WPUrl $url
-    $target = [WinPrestige.Loopback]::WaitForRedirect($port, $TimeoutSeconds, $script:WPSignedInPage)
+    try { $target = [WinPrestige.Loopback]::WaitForRedirect($port, $TimeoutSeconds, $script:WPSignedInPage) }
+    catch { throw $(if ($_.Exception.InnerException -is [InvalidOperationException]) { $busy } else { $_.Exception.InnerException.Message }) }
     if (-not $target) { throw $(if (Test-WPCancel) { 'Cancelled' } else { "No answer from the $($prov.Name) sign-in page within $([int]($TimeoutSeconds / 60)) minutes." }) }
     $err = Get-WPQueryValue $target 'error'
     if ($err) { throw "$($prov.Name) sign-in was not completed: $err $(Get-WPQueryValue $target 'error_description')".Trim() }
