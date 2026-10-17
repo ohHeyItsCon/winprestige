@@ -17,14 +17,15 @@
 #region Catalogue and app registrations ---------------------------------------
 
 $script:WPCloudProviders = @(
-    [pscustomobject]@{ Id = 'onedrive'; Name = 'OneDrive'; Kind = 'oauth'; Hash = 'quickxor'; Web = 'https://onedrive.live.com'; Where = 'OneDrive > Apps > WinPrestige'
-        Blurb = 'Sign in with your Microsoft account. WinPrestige only gets its own folder (Apps > WinPrestige), not the rest of your OneDrive.'
+    # Browser sign-in to OneDrive, Google Drive and Dropbox is in beta: it hasn't been proven end to end with real accounts yet.
+    [pscustomobject]@{ Id = 'onedrive'; Name = 'OneDrive'; Kind = 'oauth'; Beta = $true; Hash = 'quickxor'; Web = 'https://onedrive.live.com'; Where = 'OneDrive > Apps > WinPrestige'
+        Blurb = 'Beta. Sign in with your Microsoft account. WinPrestige only gets its own folder (Apps > WinPrestige), not the rest of your OneDrive. For now, keep a copy of the backup somewhere else too.'
     }
-    [pscustomobject]@{ Id = 'googledrive'; Name = 'Google Drive'; Kind = 'oauth'; Hash = 'md5'; Web = 'https://drive.google.com'; Where = 'Google Drive > My Drive'
-        Blurb = 'Sign in with your Google account. WinPrestige can only see the files it creates, not the rest of your Drive.'
+    [pscustomobject]@{ Id = 'googledrive'; Name = 'Google Drive'; Kind = 'oauth'; Beta = $true; Hash = 'md5'; Web = 'https://drive.google.com'; Where = 'Google Drive > My Drive'
+        Blurb = 'Beta. Sign in with your Google account. WinPrestige can only see the files it creates, not the rest of your Drive. For now, keep a copy of the backup somewhere else too.'
     }
-    [pscustomobject]@{ Id = 'dropbox'; Name = 'Dropbox'; Kind = 'oauth'; Hash = 'dropbox'; Web = 'https://www.dropbox.com/home/Apps'; Where = 'Dropbox > Apps > WinPrestige'
-        Blurb = 'Sign in with your Dropbox account. WinPrestige only gets its own folder (Apps > WinPrestige).'
+    [pscustomobject]@{ Id = 'dropbox'; Name = 'Dropbox'; Kind = 'oauth'; Beta = $true; Hash = 'dropbox'; Web = 'https://www.dropbox.com/home/Apps'; Where = 'Dropbox > Apps > WinPrestige'
+        Blurb = 'Beta. Sign in with your Dropbox account. WinPrestige only gets its own folder (Apps > WinPrestige). For now, keep a copy of the backup somewhere else too.'
     }
     [pscustomobject]@{ Id = 'nextcloud'; Name = 'Nextcloud'; Kind = 'nextcloud'; Hash = 'sha1'; Web = ''; Where = 'Nextcloud > Files'
         Blurb = 'Your own Nextcloud: Docker, AIO, a NAS app or a hosted one. You sign in in the browser and Nextcloud gives WinPrestige its own app password, which you can revoke any time.'
@@ -321,28 +322,77 @@ function Connect-WPCloudOAuth {
     $busy = "Port $port on this PC is in use, probably by another WinPrestige window still waiting for a sign-in. Close it, or wait up to 5 minutes, then try again."
     try { $probe = New-Object Net.Sockets.TcpListener ([Net.IPAddress]::Loopback, $port); $probe.Start(); $probe.Stop() } catch { throw $busy }
     [WinPrestige.CloudHttp]::Cancel = $false
-    Write-WPLog "Opening $($prov.Name) sign-in in your browser..." 'step'
+    # Each step goes in the log (no codes or tokens), so a failed sign-in says where it stopped.
+    Write-WPLog "Opening $($prov.Name) sign-in in your browser (beta). App $($app.clientId), answer expected at $redirect" 'step'
     Open-WPUrl $url
     try { $target = [WinPrestige.Loopback]::WaitForRedirect($port, $TimeoutSeconds, $script:WPSignedInPage) }
-    catch { throw $(if ($_.Exception.InnerException -is [InvalidOperationException]) { $busy } else { $_.Exception.InnerException.Message }) }
-    if (-not $target) { throw $(if (Test-WPCancel) { 'Cancelled' } else { "No answer from the $($prov.Name) sign-in page within $([int]($TimeoutSeconds / 60)) minutes." }) }
+    catch {
+        $inner = $_.Exception; while ($inner.InnerException) { $inner = $inner.InnerException }
+        throw $(if ($inner -is [InvalidOperationException]) { $busy } else { "Couldn't wait for the sign-in answer: $($inner.Message)" })
+    }
+    if (-not $target) { throw $(if (Test-WPCancel) { 'Cancelled' } else { "No answer from the $($prov.Name) sign-in page within $([int]($TimeoutSeconds / 60)) minutes. If the browser showed an error page, that's the reason; if it said you're signed in, a firewall or security app may have blocked $redirect." }) }
+    Write-WPLog "  1. The browser handed the answer back to WinPrestige" 'info'
     $err = Get-WPQueryValue $target 'error'
     if ($err) { throw "$($prov.Name) sign-in was not completed: $err $(Get-WPQueryValue $target 'error_description')".Trim() }
     if ((Get-WPQueryValue $target 'state') -ne $stateTok) { throw 'The sign-in answer did not match this request, so it was ignored.' }
     $code = Get-WPQueryValue $target 'code'
+    if (-not $code) { throw "The $($prov.Name) sign-in answer had no authorization code." }
     $form = @{ grant_type = 'authorization_code'; code = $code; redirect_uri = $redirect; client_id = $app.clientId; code_verifier = $verifier }
     if ($app.clientSecret) { $form.client_secret = $app.clientSecret }
     if ($Provider -eq 'onedrive') { $form.scope = $app.scope }
     $r = Invoke-WPHttp 'POST' $app.tokenUrl @('Content-Type', 'application/x-www-form-urlencoded') (ConvertTo-WPForm $form)
-    if (-not $r.Ok) { throw (Get-WPHttpError $r "Signing in to $($prov.Name)") }
+    if (-not $r.Ok) { throw ((Get-WPHttpError $r "Signing in to $($prov.Name)") + (Get-WPOAuthHint $Provider $r.Body)) }
     $tok = ConvertFrom-WPJsonBody $r
+    if (-not $tok.access_token) { throw "$($prov.Name) didn't send a sign-in token back." }
+    if (-not $tok.refresh_token) { Write-WPLog "  $($prov.Name) sent no refresh token, so you'll have to sign in again when this one expires." 'warn' }
+    Write-WPLog "  2. $($prov.Name) accepted the sign-in" 'info'
     $secret = @{ access_token = $tok.access_token; refresh_token = $tok.refresh_token; expires = (Get-Date).AddSeconds([int]$tok.expires_in - 60).ToString('o') }
     $acct = New-WPCloudAccountObject $Provider @{}
     Set-WPCloudSecret $acct $secret
+    Test-WPCloudOAuthAccess $acct
+    Write-WPLog "  3. WinPrestige can reach its folder in $($prov.Name)" 'info'
     Update-WPCloudAccountInfo $acct
     Set-WPCloudAccount $acct
     Write-WPLog "Signed in to $($prov.Name) as $($acct.Label)." 'ok'
     return $acct
+}
+
+function Get-WPOAuthHint {
+    # What to change in the provider's app registration for the usual sign-in errors.
+    param([string]$Provider, [string]$Body)
+    $b = [string]$Body
+    switch ($Provider) {
+        'dropbox' {
+            if ($b -match 'missing_scope|required_scope') { return ' In the Dropbox App Console, open the app > Permissions, tick files.metadata.read, files.content.read and files.content.write, press Submit, then sign in again.' }
+            if ($b -match 'invalid_client|client_secret|PKCE|code_verifier') { return ' In the Dropbox App Console > Settings > OAuth 2, set "Allow public clients (Implicit Grant & PKCE)" to Allow.' }
+            if ($b -match 'redirect_uri') { return " Add the redirect URI from data\cloud-apps.json in the Dropbox App Console > Settings > OAuth 2 (it must match exactly, including the trailing slash)." }
+        }
+        'onedrive' {
+            if ($b -match 'AADSTS7000218|client_assertion|client_secret') { return ' In Entra > App registrations > Authentication, add the redirect under "Mobile and desktop applications" (not Web) and set "Allow public client flows" to Yes.' }
+            if ($b -match 'AADSTS50011|redirect') { return ' In Entra > App registrations > Authentication, add http://localhost under "Mobile and desktop applications".' }
+            if ($b -match 'AADSTS700016') { return ' The client ID in data\cloud-apps.json is not a registration Microsoft knows, or it is not set to allow personal Microsoft accounts.' }
+        }
+        'googledrive' {
+            if ($b -match 'invalid_client|unauthorized_client') { return ' Use a client of type "Desktop app" and copy both its client ID and client secret into data\cloud-apps.json.' }
+            if ($b -match 'access_denied|insufficient|scope') { return ' While the Google app is in Testing, add your Google account as a test user, and make sure the drive.file scope is listed under Data access.' }
+        }
+    }
+    return ''
+}
+
+function Test-WPCloudOAuthAccess {
+    # Right after signing in, check WinPrestige can actually use its folder, so a missing permission
+    # shows up now and not halfway through a backup.
+    param($Account)
+    $ctx = New-WPCloudContext $Account ''
+    $prov = Get-WPCloudProvider $Account.Provider
+    switch ($Account.Provider) {
+        'onedrive' { $r = Invoke-WPHttp 'GET' "$($ctx.Api)/me/drive/special/approot" (Get-WPCloudAuth $ctx) }
+        'googledrive' { $r = Invoke-WPHttp 'GET' "$($ctx.Api)/drive/v3/about?fields=user(emailAddress)" (Get-WPCloudAuth $ctx) }
+        'dropbox' { $r = Invoke-WPHttp 'POST' "$($ctx.Api)/files/list_folder" ((Get-WPCloudAuth $ctx) + @('Content-Type', 'application/json')) '{"path":"","limit":1}' }
+        default { return }
+    }
+    if (-not $r.Ok) { throw ((Get-WPHttpError $r "Signed in, but opening WinPrestige's folder in $($prov.Name)") + (Get-WPOAuthHint $Account.Provider $r.Body)) }
 }
 
 function Get-WPCloudToken {

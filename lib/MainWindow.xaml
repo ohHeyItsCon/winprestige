@@ -1034,15 +1034,15 @@
                   <ComboBoxItem Style="{StaticResource ComboHeader}" Content="CLOUD ACCOUNT  -  SIGN IN, UPLOAD AND VERIFY"/>
                   <ComboBoxItem Tag="onedrive">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="#4BA3F2" VerticalAlignment="Center"/>
-                      <StackPanel><TextBlock Text="OneDrive" FontWeight="SemiBold"/><TextBlock Text="Microsoft account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                      <StackPanel><TextBlock Text="OneDrive (beta)" FontWeight="SemiBold"/><TextBlock Text="Microsoft account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
                   </ComboBoxItem>
                   <ComboBoxItem Tag="googledrive">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="#3DDC97" VerticalAlignment="Center"/>
-                      <StackPanel><TextBlock Text="Google Drive" FontWeight="SemiBold"/><TextBlock Text="Google account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                      <StackPanel><TextBlock Text="Google Drive (beta)" FontWeight="SemiBold"/><TextBlock Text="Google account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
                   </ComboBoxItem>
                   <ComboBoxItem Tag="dropbox">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE753;" FontFamily="{StaticResource Icons}" FontSize="17" Width="30" Foreground="#7B9CE9" VerticalAlignment="Center"/>
-                      <StackPanel><TextBlock Text="Dropbox" FontWeight="SemiBold"/><TextBlock Text="Dropbox account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
+                      <StackPanel><TextBlock Text="Dropbox (beta)" FontWeight="SemiBold"/><TextBlock Text="Dropbox account" Foreground="{StaticResource Muted}" FontSize="11.5"/></StackPanel></StackPanel>
                   </ComboBoxItem>
                   <ComboBoxItem Style="{StaticResource ComboHeader}" Content="SELF-HOSTED AND HOMELAB"/>
                   <ComboBoxItem Tag="nextcloud">
@@ -1127,6 +1127,9 @@
                   <Button x:Name="BtnReadyReport" Style="{StaticResource Btn}" Margin="0,0,8,6" Padding="14,9">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Open readiness report"/></StackPanel>
                   </Button>
+                  <Button x:Name="BtnMakeZip" Style="{StaticResource Btn}" Margin="0,0,8,6" Padding="14,9" ToolTip="Saves the whole backup as one .zip next to it. Load the zip in WinPrestige after the reset; it unzips long paths that Windows' own Extract can't.">
+                    <StackPanel Orientation="Horizontal"><TextBlock Text="&#xF012;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Make a .zip copy"/></StackPanel>
+                  </Button>
                   <Button x:Name="BtnSyncWeb" Style="{StaticResource Btn}" Margin="0,0,8,6" Padding="14,9" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE774;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock x:Name="BtnSyncWebText" Text="Check on the web"/></StackPanel>
                   </Button>
@@ -1156,6 +1159,9 @@
                 <Button x:Name="BtnBrowseRestore" Style="{StaticResource Btn}" Margin="0,0,6,0">
                   <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE838;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Browse"/></StackPanel>
                 </Button>
+                <Button x:Name="BtnBrowseZip" Style="{StaticResource Btn}" Margin="0,0,6,0" ToolTip="Pick a zipped backup. WinPrestige unzips it itself, so long file paths aren't a problem.">
+                  <StackPanel Orientation="Horizontal"><TextBlock Text="&#xF012;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Zip"/></StackPanel>
+                </Button>
                 <Button x:Name="BtnLoadBackup" Style="{StaticResource Btn}" Margin="0">
                   <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE72C;" FontFamily="{StaticResource Icons}" Margin="0,1,8,0"/><TextBlock Text="Load"/></StackPanel>
                 </Button>
@@ -1170,6 +1176,10 @@
                 <CheckBox x:Name="OptSkipInstalled" Style="{StaticResource Switch}" Content="Skip apps already installed" IsChecked="True"/>
                 <CheckBox x:Name="OptPreferLocal" Style="{StaticResource Switch}" Content="Use saved installers" IsChecked="True"/>
                 <CheckBox x:Name="OptOnlineFallback" Style="{StaticResource Switch}" Content="Fall back to winget online" IsChecked="True"/>
+                <CheckBox x:Name="OptPreferVendor" Style="{StaticResource Switch}" Content="Vendor installer first" IsChecked="True"
+                          ToolTip="For apps that came from the Microsoft Store, use the vendor's own installer when winget has one. The Store is still used if that fails."/>
+                <CheckBox x:Name="OptOpenApps" Style="{StaticResource Switch}" Content="Open apps when it's done"
+                          ToolTip="Opens every app that's installed after the restore, one after another, so you can sign in to them."/>
                 <CheckBox x:Name="OptSilent" Style="{StaticResource Switch}" Content="Silent installs" IsChecked="True"/>
                 <CheckBox x:Name="OptParallel" Style="{StaticResource Switch}" Content="Install several at once" IsChecked="True"
                           ToolTip="Runs up to 3 simple installers side by side. MSI-based installers still run one at a time, at the end."/>
@@ -1178,11 +1188,17 @@
               <Button x:Name="BtnStartRestore" Style="{StaticResource BtnPrimary}" Margin="0,16,0,8" Padding="12,10">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Start restore" FontSize="14"/></StackPanel>
               </Button>
+              <Button x:Name="BtnRestoreSettings" Style="{StaticResource BtnGhost}" ToolTip="Puts back the ticked app settings (and the Start and taskbar layout, if ticked) without installing anything. Use it after installing apps yourself.">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Restore app settings only"/></StackPanel>
+              </Button>
+              <Button x:Name="BtnOpenApps" Style="{StaticResource BtnGhost}" ToolTip="Opens every ticked app that's installed, one after another, so you can sign in to them.">
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE8A7;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open installed apps"/></StackPanel>
+              </Button>
               <Button x:Name="BtnManualLinks" Style="{StaticResource BtnGhost}">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE71B;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open manual links"/></StackPanel>
               </Button>
               <Button x:Name="BtnQueueGames" Style="{StaticResource BtnGhost}">
-                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock x:Name="QueueGamesText" Text="Queue ticked games in Steam" TextWrapping="Wrap"/></StackPanel>
+                <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE7FC;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock x:Name="QueueGamesText" Text="Install ticked games in Steam" TextWrapping="Wrap"/></StackPanel>
               </Button>
               <Button x:Name="BtnOpenRestoreReport" Style="{StaticResource BtnGhost}">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE9F9;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Open report"/></StackPanel>

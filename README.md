@@ -19,7 +19,7 @@ Reinstalling Windows is easy. Rebuilding your setup afterwards isn't: rememberin
 - **Skips games, keeps launchers.** Steam, Epic, Battle.net and the rest stay in. Games that install their own launcher, like VALORANT and League of Legends, count as launchers.
 - **Saves the latest official installers** to a folder or NAS share, using [winget](https://learn.microsoft.com/windows/package-manager/). winget records each vendor's own download link and checks the file against a SHA-256 hash.
 - **Backs up app settings** for about 50 apps, including OBS (scenes, profiles and the media your scenes use), FanControl, Elgato Stream Deck and Wave Link, Corsair iCUE, Logitech G HUB, SteelSeries GG, NZXT CAM, SignalRGB, BakkesMod, Wallpaper Engine, Minecraft worlds, Adobe presets and Windows Terminal. You can add any other folder too.
-- **Extras:** fonts you installed, environment variables, and optionally Wi-Fi networks, drivers and your user folders.
+- **Extras:** fonts you installed, environment variables, your Start menu and taskbar pins, and optionally Wi-Fi networks, drivers and your user folders.
 - **Restores everything** in one batch, silently. Simple installers run three at a time and MSI-based ones run one by one at the end. If a saved installer fails, winget installs the app online instead. Your settings go back in place, even if your Windows user name changes.
 - **Finds your backup** on a fresh copy of WinPrestige, and **picks up where it left off** if the PC restarts mid-restore.
 - **Stays up to date.** Run it again before the reset and it downloads only newer installers, adds new apps, and removes ones you've uninstalled.
@@ -56,6 +56,8 @@ Requirements: Windows 10 or 11. winget (App Installer) is used when available; w
 5. **Ready to reset:** when the backup finishes, a summary shows how every ticked app will come back (saved installer, online install, or manual action), which app settings and extras are included, and any problems, such as an installer file that's missing. The same check is saved in the backup as `Ready to reset.html`.
 
 ### Backing up to a cloud account
+
+> **Beta:** signing in to OneDrive, Google Drive and Dropbox hasn't been proven end to end with real accounts yet, and this release ships no OneDrive or Google Drive app registration, so those two can't sign in until one is added (see [docs/CLOUD-SETUP.md](docs/CLOUD-SETUP.md)). Keep a second copy of your backup on a drive or NAS until it's out of beta. Nextcloud, WebDAV and S3 don't use this sign-in.
 
 Choose **OneDrive**, **Google Drive** or **Dropbox** in the destination list and press the sign-in button. Your browser opens on the provider's own sign-in page; WinPrestige never sees your password, only a token that lets it use its own folder:
 
@@ -95,6 +97,16 @@ The restore runs in one batch:
 5. Your app settings and extras. Each app is closed first, and background services such as FanControl's or NZXT CAM's are paused while its files go back. Every file is then checked against the backup, and anything that didn't land is flagged in yellow.
 
 If an installer clashes with another one running at the same time, it gets retried on its own. Afterwards, use **Open manual links** for anything that needs a manual download, and restart the PC.
+
+- **Restore app settings only** puts the ticked settings back without installing anything, for apps you installed yourself.
+- **Open apps when it's done** (or **Open installed apps** any time) opens each installed app once, so you can sign in to them one after another.
+- **Install ticked games in Steam** closes Steam, adds back the library folders still on your drives (games that survived the reset show up as installed), and puts the other games straight into Steam's download queue in their old library, or in a library you pick if they were on the system drive. No install window per game.
+- Apps that came from the Microsoft Store are saved with the vendor's own installer when winget has one, and fall back to the Store if it fails.
+- The **Start menu and taskbar** extra goes back last and only pins apps that are installed by then, in the same order.
+
+### Zipped backups
+
+Windows' own **Extract all** stops at paths longer than 260 characters, which settings folders often have. Don't unzip a backup with it: load the `.zip` in WinPrestige instead (**Zip** on the Restore screen, or drag it onto the window). It unzips it into a short folder such as `D:\WPRestore\...`, long paths included. **Make a .zip copy** on the Ready to reset card creates such a zip.
 
 If the PC restarts in the middle, WinPrestige opens again after you sign in and offers to **Continue restore** with whatever's left.
 

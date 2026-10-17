@@ -133,7 +133,7 @@ $SettingsPath = Join-Path $script:WP.StateDir 'settings.json'
 $FirstRun = $Demo -or -not (Test-Path -LiteralPath $SettingsPath)
 
 function Get-WPSettings {
-    $s = @{ Destination = ''; DestKind = ''; CloudAccounts = @{}; SyncConfirmed = @(); Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{}; RecentBackups = @() }
+    $s = @{ Destination = ''; DestKind = ''; CloudAccounts = @{}; SyncConfirmed = @(); Selections = @{}; Chosen = @{}; CustomUrls = @{}; CustomConfigs = @(); ConfigSelections = @{}; ExtraSelections = @{}; RecentBackups = @(); StoreKeep = @{} }
     if ($Demo) { return $s }
     $raw = $null
     try { $raw = Read-WPJson $SettingsPath } catch { }
@@ -141,7 +141,7 @@ function Get-WPSettings {
         if ($raw.Destination) { $s.Destination = [string]$raw.Destination }
         if ($raw.DestKind) { $s.DestKind = [string]$raw.DestKind }
         if ($raw.SyncConfirmed) { $s.SyncConfirmed = @(foreach ($c in $raw.SyncConfirmed) { $c }) }
-        foreach ($k in @('Selections', 'Chosen', 'CustomUrls', 'ConfigSelections', 'ExtraSelections', 'CloudAccounts')) {
+        foreach ($k in @('Selections', 'Chosen', 'CustomUrls', 'ConfigSelections', 'ExtraSelections', 'CloudAccounts', 'StoreKeep')) {
             if ($raw.$k) { $s[$k] = ConvertTo-WPHashtable $raw.$k }
         }
         if ($raw.CustomConfigs) { $s.CustomConfigs = @(foreach ($c in $raw.CustomConfigs) { $c }) }
@@ -583,7 +583,7 @@ function Set-WPBusy {
     $vis = if ($busy) { 'Visible' } else { 'Collapsed' }
     $ui.BtnCancel.Visibility = $vis
     $ui.Progress.Visibility = $vis
-    foreach ($n in @('BtnScan', 'BtnLinks', 'BtnStartBackup', 'BtnStartRestore', 'BtnDetectConfigs', 'BtnLoadBackup')) { $ui[$n].IsEnabled = -not $busy }
+    foreach ($n in @('BtnScan', 'BtnLinks', 'BtnStartBackup', 'BtnStartRestore', 'BtnRestoreSettings', 'BtnDetectConfigs', 'BtnLoadBackup', 'BtnBrowseZip', 'BtnMakeZip')) { $ui[$n].IsEnabled = -not $busy }
     if ($busy -and -not $ui.BusySpinner.Content) { $ui.BusySpinner.Content = New-WPSpinner 14 }
     $ui.BusySpinner.Visibility = $vis
     if ($busy -and -not $state.WasBusy) {
@@ -724,6 +724,7 @@ function Get-WPAppBadge {
         'custom' { return @{ Text = 'your link'; Color = $Palette.Good; Tip = "Downloaded from your link: $($App.CustomUrl)" } }
         'store' { return @{ Text = 'Store'; Color = $Palette.Purple; Tip = "Reinstalled from the Microsoft Store ($($App.WingetId))." } }
         'winget' {
+            if ($App.Match -eq 'vendor') { return @{ Text = 'vendor'; Color = $Palette.Accent; Tip = "Installed from the Microsoft Store here; the vendor's own installer ($($App.WingetId)) is saved instead." } }
             $tip = "Official installer from winget: $($App.WingetId)"
             if (@('search', 'override') -contains $App.Match) { $tip += "`nMatched by name; check the details panel." }
             return @{ Text = 'winget'; Color = $Palette.Accent; Tip = $tip }
@@ -910,6 +911,11 @@ function Set-WPAppsFromScan {
         if ($old -and $a.Kind -ne 'winget' -and -not $a.WingetId -and $old.Match -and $old.Match -ne 'searching') {
             $a.WingetId = $old.WingetId; $a.Source = $old.Source; $a.Match = $old.Match; $a.Candidates = $old.Candidates
         }
+        # Keep a Store app's switch to the vendor's installer across rescans (the lookup confirms it again).
+        if ($old -and $old.PSObject.Properties['StoreId'] -and $old.StoreId -and @($old.StoreId, $old.WingetId) -contains $a.WingetId -and -not $state.Settings.StoreKeep[$a.Key]) {
+            $a | Add-Member -NotePropertyName StoreId -NotePropertyValue ([string]$old.StoreId) -Force
+            $a.WingetId = $old.WingetId; $a.Source = 'winget'; $a.Match = 'vendor'
+        }
         if ($a.Kind -ne 'winget' -and $state.Settings.Chosen.ContainsKey($a.Key)) {
             $ch = $state.Settings.Chosen[$a.Key]
             if ($ch.Id) { $a.WingetId = [string]$ch.Id; $a.Source = [string]$ch.Source; $a.Match = 'chosen' }
@@ -1006,6 +1012,11 @@ function Show-WPDetails {
         'winget' {
             Add-WPDetailText 'The official installer is downloaded with winget and saved to your backup.'
             [void]$p.Children.Add((New-WPCopyText $app.WingetId))
+            if ($app.Match -eq 'vendor') {
+                Add-WPDetailText "On this PC it came from the Microsoft Store ($($app.StoreId)). The vendor's own installer is saved instead, so it comes back without the Store or a Microsoft account. If that installer fails, the restore uses the Store." $Palette.Muted '0,8,0,0'
+                Add-WPDetailLinks @(New-WPLinkButton 'Use the Store instead' $app.Key { Set-WPStoreKeep $this.Tag $true })
+                break
+            }
             if ($app.Latest -and $app.Version -and $app.Latest -ne $app.Version) { Add-WPDetailText "Installed $($app.Version), newest $($app.Latest). The backup saves the newest." $Palette.Muted '0,6,0,0' }
             if (@('search', 'override') -contains $app.Match) {
                 Add-WPDetailText "Found by searching winget for the name. Make sure it's the right app." $Palette.Warn '0,8,0,0'
@@ -1021,7 +1032,10 @@ function Show-WPDetails {
         'store' {
             Add-WPDetailText 'Reinstalled from the Microsoft Store through winget during the restore (needs internet).'
             [void]$p.Children.Add((New-WPCopyText $app.WingetId))
+            if ($state.Settings.StoreKeep[$app.Key]) { Add-WPDetailText "You chose the Store over the vendor's installer." $Palette.Muted '0,6,0,0' }
+            elseif ($app.Match -ne 'searching') { Add-WPDetailText "winget has no installer from the vendor for it, so it can't be saved: the Store only lets work and school admin accounts download its apps." $Palette.Muted '0,6,0,0' }
             $btns = @(New-WPLinkButton 'Open in Store' "https://apps.microsoft.com/detail/$($app.WingetId)" { Open-WPUrl $this.Tag })
+            if ($state.Settings.StoreKeep[$app.Key]) { $btns += New-WPLinkButton "Use the vendor's installer" $app.Key { Set-WPStoreKeep $this.Tag $false } }
             if ($app.Kind -ne 'winget') { $btns += New-WPLinkButton 'Not this app' $app.Key { Set-WPChosen $this.Tag '' '' } }
             if ($app.Match -eq 'chosen') { $btns += New-WPLinkButton 'Undo my pick' $app.Key { Clear-WPChosen $this.Tag } }
             Add-WPDetailLinks $btns
@@ -1118,6 +1132,25 @@ function Set-WPChosen {
     Show-WPDetails $Key
     Update-WPAppSummary
     Update-WPBackupStats
+}
+
+function Set-WPStoreKeep {
+    # Keep a Store app on the Store ($true), or go back to looking for the vendor's installer.
+    param([string]$Key, [bool]$Keep)
+    $a = $state.AppIndex[$Key]
+    if (-not $a) { return }
+    if ($Keep) {
+        $state.Settings.StoreKeep[$Key] = $true
+        if ($a.StoreId) { $a.WingetId = [string]$a.StoreId; $a.Source = 'msstore'; $a.Match = 'installed'; $a.StoreId = '' }
+    } else {
+        $state.Settings.StoreKeep.Remove($Key)
+    }
+    Save-WPSettings
+    Update-WPAppRow $a
+    Show-WPDetails $Key
+    Update-WPAppSummary
+    Update-WPBackupStats
+    if (-not $Keep) { Start-WPLookup @($a) }
 }
 
 function Clear-WPChosen {
@@ -1228,8 +1261,9 @@ function Start-WPLookup {
     if ($Demo) { Set-WPStatus 'Every ticked app already has a download source.'; return }
     Start-WPJob 'Lookup' {
         Resolve-WPLinks $P.Apps $P.Chosen -Force:$P.Force
+        Resolve-WPVendorPackages $P.Apps $P.Keep -Force:$P.Force
         'done'
-    } @{ Apps = @($Apps); Chosen = $state.Settings.Chosen; Force = [bool]$Force } {
+    } @{ Apps = @($Apps); Chosen = $state.Settings.Chosen; Keep = $state.Settings.StoreKeep; Force = [bool]$Force } {
         param($r, $err)
         Save-WPScanCache
         Update-WPAppSummary
@@ -2057,9 +2091,9 @@ function Start-WPBackup {
 # Rows for dropdowns built in code (the restore dialog). Same look as the Backup page's XAML items.
 $CloudKindRows = @(
     @{ Header = 'CLOUD ACCOUNT' }
-    @{ Tag = 'onedrive'; Glyph = 0xE753; Color = '#4BA3F2'; Name = 'OneDrive'; Sub = 'Microsoft account' }
-    @{ Tag = 'googledrive'; Glyph = 0xE753; Color = '#3DDC97'; Name = 'Google Drive'; Sub = 'Google account' }
-    @{ Tag = 'dropbox'; Glyph = 0xE753; Color = '#7B9CE9'; Name = 'Dropbox'; Sub = 'Dropbox account' }
+    @{ Tag = 'onedrive'; Glyph = 0xE753; Color = '#4BA3F2'; Name = 'OneDrive (beta)'; Sub = 'Microsoft account' }
+    @{ Tag = 'googledrive'; Glyph = 0xE753; Color = '#3DDC97'; Name = 'Google Drive (beta)'; Sub = 'Google account' }
+    @{ Tag = 'dropbox'; Glyph = 0xE753; Color = '#7B9CE9'; Name = 'Dropbox (beta)'; Sub = 'Dropbox account' }
     @{ Header = 'SELF-HOSTED AND HOMELAB' }
     @{ Tag = 'nextcloud'; Glyph = 0xE80F; Color = '#C094F0'; Name = 'Nextcloud'; Sub = 'Docker, AIO, a NAS app or hosted' }
     @{ Tag = 'webdav'; Glyph = 0xE774; Color = '#C094F0'; Name = 'WebDAV server'; Sub = 'ownCloud, Synology, QNAP, Seafile, pCloud, Koofr...' }
@@ -2637,7 +2671,8 @@ function Import-WPBackup {
     if (-not $path) { return }
     $path = ConvertTo-WPUncPath $path
     $ui.RestorePath.Text = $path
-    $isList = (-not $Demo) -and $path -match '(?i)\.json$' -and (Test-Path -LiteralPath $path -PathType Leaf)
+    if (-not $Demo -and $path -match '(?i)\.zip$' -and (Test-Path -LiteralPath $path -PathType Leaf)) { Start-WPUnzip $path; return }
+    $isList =(-not $Demo) -and $path -match '(?i)\.json$' -and (Test-Path -LiteralPath $path -PathType Leaf)
     if ($Demo) { $m = Get-WPDemoManifest } elseif ($isList) {
         $m = ConvertFrom-WPAppList $path
         if (-not $m) {
@@ -2673,7 +2708,7 @@ function Import-WPBackup {
         if ($e.Category -eq 'system') { continue }
         if ($e.Category -eq 'games') {
             if (-not $e.GameUri) { continue }
-            New-WPRestoreRow $e.Key $e.Name 'games' (Get-WPRestoreBadge ([pscustomobject]@{ Method = 'game'; Via = $e.Via })) 'Tick, then use "Queue ticked games in Steam" once Steam is installed and signed in.' $false $true (Resolve-WPEntryIcon $e)
+            New-WPRestoreRow $e.Key $e.Name 'games' (Get-WPRestoreBadge ([pscustomobject]@{ Method = 'game'; Via = $e.Via })) 'Tick, then use "Install ticked games in Steam" once Steam is installed.' $false $true (Resolve-WPEntryIcon $e)
             continue
         }
         if (-not $e.Selected) { continue }
@@ -2700,6 +2735,26 @@ function Import-WPBackup {
     Update-WPRestoreChips
     Update-WPRestoreLayout
     Update-WPRevertButtons
+}
+
+function Start-WPUnzip {
+    # A zipped backup: unzip it to a short folder on a local drive, then load it from there.
+    param([string]$Zip)
+    $ui.RestoreInfo.Text = "Unzipping the backup$Ellipsis This can take a while for a big backup."
+    $ui.RestoreInfo.Foreground = Get-WPBrush $Palette.Muted
+    $ui.RestoreLog.Items.Clear()
+    $state.LogTarget = $ui.RestoreLog
+    Start-WPJob 'Unzip' { Expand-WPBackupZip $P.Zip } @{ Zip = $Zip } {
+        param($r, $err)
+        if ($r -and $r.Ok) {
+            Import-WPBackup ([string]$r.Folder)
+            if ($r.Detail) { $ui.RestoreInfo.Text = "Unzipped to $($r.Folder), but $($r.Detail) (see the log). " + $ui.RestoreInfo.Text }
+            else { Set-WPStatus "Unzipped to $($r.Folder). You can delete that folder once the restore is done." }
+        } else {
+            $ui.RestoreInfo.Text = "Couldn't unzip it: $(if ($r) { $r.Detail } elseif ($err) { $err.Message } else { 'unknown error' })"
+            $ui.RestoreInfo.Foreground = Get-WPBrush $Palette.Warn
+        }
+    }
 }
 
 function Format-WPBackupDate {
@@ -2975,6 +3030,7 @@ function Find-WPBackupFolder {
     if ($Path -match '(?i)\.json$' -and (Test-Path -LiteralPath $Path -PathType Leaf)) {
         try { $doc = Read-WPJson $Path; if ($doc.kind -eq 'app-list') { return $Path } } catch { }
     }
+    if ($Path -match '(?i)\.zip$' -and (Test-Path -LiteralPath $Path -PathType Leaf)) { return $Path }
     if (Test-Path -LiteralPath $Path -PathType Leaf) { $Path = Split-Path -Parent $Path }
     foreach ($c in @($Path, (Join-Path $Path 'WinPrestige Backup'), (Split-Path -Parent $Path))) {
         if ($c -and (Test-Path -LiteralPath (Join-Path $c 'manifest.json'))) { return $c.TrimEnd('\') }
@@ -2998,7 +3054,7 @@ function Invoke-WPDroppedPaths {
         Set-WPStatus ("Added {0} to App settings." -f $(if ($items.Count -eq 1) { Split-Path -Leaf $items[0] } else { "$($items.Count) items" }))
         return
     }
-    Set-WPStatus "That isn't a WinPrestige backup. Drop the backup folder, the one with manifest.json in it."
+    Set-WPStatus "That isn't a WinPrestige backup. Drop the backup folder (the one with manifest.json in it) or a zip of it."
 }
 
 function Set-WPRunOnce {
@@ -3032,7 +3088,7 @@ function Update-WPRestoreLayout {
     $titles = @{ configs = 'App settings'; extras = 'Extras' }
     $hints = @{
         configs = 'Restored after the apps are installed.'; extras = 'Fonts, environment variables and anything else you saved.'
-        games = 'Not installed automatically. Tick some, then queue them in Steam.'
+        games = 'Not installed automatically. Tick some, then hand them to Steam.'
     }
     foreach ($gid in $order) {
         $rows = @($state.RRows.Keys | ForEach-Object { $state.RRows[$_] } | Where-Object { $_.Group -eq $gid -and (Test-WPFilter @($_.Name)) } | Sort-Object Name)
@@ -3087,20 +3143,33 @@ function Set-WPRestoreOnly {
 }
 
 function Start-WPRestore {
-    param([switch]$NoConfirm, $Progress)
+    param([switch]$NoConfirm, $Progress, [switch]$SettingsOnly)
     if (-not $state.Restore) { [void][System.Windows.MessageBox]::Show($window, 'Load a backup folder first.', 'WinPrestige'); return }
     Hide-WPBanner
     $entries = @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and $_.Category -ne 'games' })
     $configs = @($state.Restore.configs | Where-Object { $state.RestoreSel['config:' + $_.Id] })
     $extras = @($state.Restore.extras | Where-Object { $state.RestoreSel['extra:' + $_.Id] })
+    if ($SettingsOnly) {
+        # Settings for apps you installed yourself (manual downloads, or after the main restore): nothing is installed.
+        $entries = @()
+        $extras = @($extras | Where-Object { $_.Id -eq 'startlayout' })
+        if ($configs.Count -eq 0 -and $extras.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Tick some app settings first.', 'WinPrestige'); return }
+    }
     $test = [bool]$ui.OptTestRun.IsChecked
     $parallel = [bool]$ui.OptParallel.IsChecked -and [bool]$ui.OptSilent.IsChecked
     if (-not $test -and -not $Screenshot -and -not $NoConfirm) {
-        $how = 'Installers run one after another.'
-        if ($parallel) { $how = 'Simple installers run three at a time; MSI-based ones run one by one at the end.' }
-        $ans = [System.Windows.MessageBox]::Show($window, "Install $($entries.Count) apps, then restore $($configs.Count) app settings and $($extras.Count) extras?`n`n$how Leave the PC alone until it finishes; some installers may still show a window.", 'WinPrestige', 'OKCancel', 'Question')
+        if ($SettingsOnly) {
+            $what = "Put back $($configs.Count) app settings"
+            if ($extras.Count) { $what += ' and the Start and taskbar layout' }
+            $ans = [System.Windows.MessageBox]::Show($window, "$what without installing anything?`n`nEach app is closed first. Settings that already match the backup are left alone, and anything replaced can be put back with Revert.", 'WinPrestige', 'OKCancel', 'Question')
+        } else {
+            $how = 'Installers run one after another.'
+            if ($parallel) { $how = 'Simple installers run three at a time; MSI-based ones run one by one at the end.' }
+            $ans = [System.Windows.MessageBox]::Show($window, "Install $($entries.Count) apps, then restore $($configs.Count) app settings and $($extras.Count) extras?`n`n$how Leave the PC alone until it finishes; some installers may still show a window.", 'WinPrestige', 'OKCancel', 'Question')
+        }
         if ($ans -ne 'OK') { return }
     }
+    $openApps = (-not $SettingsOnly) -and [bool]$ui.OptOpenApps.IsChecked -and -not $test
     $ui.RestoreLog.Items.Clear()
     $state.LogTarget = $ui.RestoreLog
     $state.RestoreResult = $null
@@ -3109,6 +3178,7 @@ function Start-WPRestore {
     $opts = @{
         TestRun = $test; SkipInstalled = [bool]$ui.OptSkipInstalled.IsChecked; PreferLocal = [bool]$ui.OptPreferLocal.IsChecked
         OnlineFallback = [bool]$ui.OptOnlineFallback.IsChecked; Silent = [bool]$ui.OptSilent.IsChecked
+        PreferVendor = [bool]$ui.OptPreferVendor.IsChecked
         Parallel = $parallel; Computer = [string]$state.Restore.computer; Progress = $Progress
     }
     if (-not $test -and -not $Demo) { Set-WPRunOnce }
@@ -3131,12 +3201,46 @@ function Start-WPRestore {
         if ($r -and -not $state.RestoreTestRun -and -not $Screenshot) {
             $bad = [int]$r.Failed + [int]$r.Unverified
             $msg = "Restore finished and checked: $($r.Ok) installed and found by Windows, $($r.Skipped) already installed, $($r.Manual) need manual action, $bad failed or not found. Settings: $([int]$r.ConfigsOk) in place, $([int]$r.ConfigsBad) to check."
-            Set-WPStatus $msg
             $next = "Use 'Open manual links' for the rest, then restart the PC so drivers and hardware apps pick up their settings."
             if ($r.RestartNeeded) { $next = "Some installers need a restart to finish. Use 'Open manual links' for the rest, then restart the PC." }
+            if (@($r.Apps).Count -eq 0 -and ([int]$r.ConfigsOk + [int]$r.ConfigsBad) -gt 0) {
+                $msg = "Settings restored: $([int]$r.ConfigsOk) in place, $([int]$r.ConfigsBad) to check."
+                $next = 'Open the apps to check them. Hardware apps (iCUE, G HUB, fan control) pick up their settings after a restart.'
+            }
+            Set-WPStatus $msg
             if ($r.Report) { $next += "`n`nThe full check is in the restore report (Open report)." }
+            if ($script:RestoreOpenApps) { $next += "`n`nAfter you press OK, your apps open one by one so you can sign in." }
             [void][System.Windows.MessageBox]::Show($window, "$msg`n`n$next", 'WinPrestige')
         }
+        if ($r -and $r.Complete -and $script:RestoreOpenApps) {
+            $names = @($r.Apps | Where-Object { @('installed', 'present') -contains $_.Outcome } | ForEach-Object { $_.Name })
+            Start-WPOpenApps $names
+        }
+    }
+    $script:RestoreOpenApps = $openApps
+}
+
+function Get-WPOpenableEntries {
+    # Ticked apps worth opening to sign in to: apps, launchers and Store apps, not runtimes or drivers.
+    return @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and @('apps', 'launchers', 'store') -contains [string]$_.Category })
+}
+
+function Start-WPOpenApps {
+    param([string[]]$Names)
+    if ($Demo) { Set-WPStatus 'Demo mode: this opens each installed app so you can sign in.'; return }
+    $keep = @{}
+    foreach ($e in @(Get-WPOpenableEntries)) { $keep[[string]$e.Name] = $true }
+    $list = @($Names | Where-Object { $keep[$_] })
+    if ($list.Count -eq 0) { Set-WPStatus 'No installed apps to open.'; return }
+    $state.LogTarget = $ui.RestoreLog
+    Add-WPLogLine ("Opening {0} apps so you can sign in..." -f $list.Count) 'step'
+    Start-WPJob 'Open apps' { Open-WPInstalledApps $P.Names } @{ Names = $list } {
+        param($r, $err)
+        if (-not $r) { return }
+        $msg = "Opened $(@($r.Opened).Count) apps."
+        if (@($r.Missing).Count) { $msg += " Not found in the Start menu (not installed yet?): $(@($r.Missing) -join ', ')." }
+        Set-WPStatus $msg
+        Add-WPLogLine $msg $(if (@($r.Missing).Count) { 'warn' } else { 'ok' })
     }
 }
 
@@ -3155,34 +3259,48 @@ function Open-WPManualLinks {
 }
 
 function Reset-WPGameQueue {
-    $state.GameQueue = $null
-    $state.GameQueueAt = 0
-    $ui.QueueGamesText.Text = 'Queue ticked games in Steam'
+    $ui.QueueGamesText.Text = 'Install ticked games in Steam'
 }
 
 function Start-WPQueueGames {
-    # Opens Steam's install window for one game at a time. Steam replaces its open window when the next
-    # game arrives, so the button turns into "Next game" and waits for you to click Install first.
+    # Steam's install window only lets you pick a drive for one game at a time and gets replaced when the
+    # next one arrives. Instead, WinPrestige closes Steam, gives it back the libraries still on disk, and
+    # puts every other game straight into Steam's download queue in the library you choose.
     if (-not $state.Restore) { return }
-    if ($Demo) { Set-WPStatus 'Demo mode: this opens a Steam install window for each ticked game, one at a time.'; return }
-    if (-not $state.GameQueue) {
-        $games = @($state.Restore.apps | Where-Object { $_.Category -eq 'games' -and $_.GameUri -and $state.RestoreSel[$_.Key] })
-        if ($games.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Tick the games you want in the Games group first.', 'WinPrestige'); return }
-        $ans = [System.Windows.MessageBox]::Show($window, "Steam opens an install window for one game at a time ($($games.Count) in all). Steam needs to be installed and signed in.`n`nAfter you click Install in Steam, press `"Next game`" here for the next one.", 'WinPrestige', 'OKCancel', 'Question')
-        if ($ans -ne 'OK') { return }
-        $state.GameQueue = $games
-        $state.GameQueueAt = 0
+    if ($Demo) { Set-WPStatus "Demo mode: this hands the ticked games to Steam's download queue, each in its own library."; return }
+    $games = @($state.Restore.apps | Where-Object { $_.Category -eq 'games' -and $_.GameUri -and $state.RestoreSel[$_.Key] })
+    if ($games.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'Tick the games you want in the Games group first.', 'WinPrestige'); return }
+    $root = Get-WPSteamRoot
+    if (-not $root) { [void][System.Windows.MessageBox]::Show($window, "Steam isn't installed yet. Install it, sign in once, then press this again.", 'WinPrestige'); return }
+    $plan = @(Get-WPSteamPlan $games $root '')
+    $choose = @($plan | Where-Object { $_.NeedsChoice })
+    $target = ''
+    if ($choose.Count) {
+        $why = $(if (@($choose | Where-Object { $_.OldLibrary }).Count) { 'were on the system drive, or their drive is gone' } else { "don't say which library they were in" })
+        $ans = [System.Windows.MessageBox]::Show($window, "$($choose.Count) of the games $why.`n`nPut them in a Steam library on another drive? Choose No to use Steam's own folder ($root).", 'WinPrestige', 'YesNoCancel', 'Question')
+        if ($ans -eq 'Cancel') { return }
+        if ($ans -eq 'Yes') {
+            $d = New-Object System.Windows.Forms.FolderBrowserDialog
+            $d.Description = 'Pick (or make) a Steam library folder for these games, for example D:\SteamLibrary.'
+            $d.ShowNewFolderButton = $true
+            $suggest = @(Find-WPSteamLibrariesOnDisk | Where-Object { -not $_.ToLowerInvariant().StartsWith($env:SystemDrive.ToLowerInvariant()) }) | Select-Object -First 1
+            if ($suggest) { $d.SelectedPath = $suggest }
+            if ($d.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { return }
+            $target = $d.SelectedPath.TrimEnd('\')
+            if ($target -match '\\steamapps(\\common)?$') { $target = $target -replace '\\steamapps(\\common)?$', '' }
+        }
+        $plan = @(Get-WPSteamPlan $games $root $target)
     }
-    $games = @($state.GameQueue)
-    $g = $games[$state.GameQueueAt]
-    $state.GameQueueAt++
-    Open-WPUrl $g.GameUri
-    if ($state.GameQueueAt -lt $games.Count) {
-        $ui.QueueGamesText.Text = "Next game: $($games[$state.GameQueueAt].Name) ($($state.GameQueueAt + 1) of $($games.Count))"
-        Set-WPStatus "Steam: click Install for $($g.Name), then press Next game."
-    } else {
-        Reset-WPGameQueue
-        Set-WPStatus "Steam: click Install for $($g.Name). That was the last of $($games.Count) games."
+    $byLib = @($plan | Group-Object Library | ForEach-Object { "  $($_.Name): $($_.Count) games" }) -join "`n"
+    $ans = [System.Windows.MessageBox]::Show($window, "WinPrestige closes Steam, adds these libraries, and puts the games in Steam's download queue. No install windows to click through.`n`n$byLib`n`nGames whose files are still on a drive are picked up as installed. Steam opens on its Downloads page when it's done; sign in if it asks.", 'WinPrestige', 'OKCancel', 'Question')
+    if ($ans -ne 'OK') { return }
+    $state.LogTarget = $ui.RestoreLog
+    Start-WPJob 'Steam' { Install-WPSteamGames $P.Games $P.Target } @{ Games = $games; Target = $target } {
+        param($r, $err)
+        if (-not $r) { return }
+        Set-WPStatus $r.Detail
+        Add-WPLogLine $r.Detail $(if ($r.Ok) { 'ok' } else { 'error' })
+        foreach ($g in $games) { if ($state.RRows[$g.Key]) { Update-WPRestoreStatus $g.Key $(if ($r.Ok) { "Handed to Steam" } else { $r.Detail }) $(if ($r.Ok) { 'ok' } else { 'warn' }) } }
     }
 }
 
@@ -3330,7 +3448,35 @@ $ui.BtnBrowseRestore.Add_Click({
     })
 $ui.BtnLoadBackup.Add_Click({ Import-WPBackup $ui.RestorePath.Text })
 $ui.RestorePath.Add_KeyDown({ param($s, $e) if ($e.Key -eq 'Return') { Import-WPBackup $ui.RestorePath.Text } })
+$ui.BtnBrowseZip.Add_Click({
+        $d = New-Object Microsoft.Win32.OpenFileDialog
+        $d.Title = 'Pick a zipped WinPrestige backup'
+        $d.Filter = 'Zip files (*.zip)|*.zip'
+        if ($d.ShowDialog($window)) { Hide-WPBanner; Import-WPBackup $d.FileName }
+    })
 $ui.BtnStartRestore.Add_Click({ Start-WPRestore })
+$ui.BtnRestoreSettings.Add_Click({ Start-WPRestore -SettingsOnly })
+$ui.BtnOpenApps.Add_Click({
+        if (-not $state.Restore) { [void][System.Windows.MessageBox]::Show($window, 'Load a backup folder first.', 'WinPrestige'); return }
+        $list = @(Get-WPOpenableEntries)
+        if ($list.Count -eq 0) { Set-WPStatus 'Tick some apps first.'; return }
+        $ans = [System.Windows.MessageBox]::Show($window, "Open the ticked apps that are installed ($($list.Count) ticked), one after another, so you can sign in?", 'WinPrestige', 'OKCancel', 'Question')
+        if ($ans -eq 'OK') { Start-WPOpenApps @($list | ForEach-Object { [string]$_.Name }) }
+    })
+$ui.BtnMakeZip.Add_Click({
+        $src = $(if ($state.Readiness -and $state.Readiness.Root) { [string]$state.Readiness.Root } else { $ui.DestBox.Text.Trim() })
+        if ($Demo) { Set-WPStatus 'Demo mode: this saves the backup as one .zip next to it.'; return }
+        if (-not $src -or -not (Test-Path -LiteralPath (Join-Path $src 'manifest.json'))) { Set-WPStatus 'Run a backup first.'; return }
+        $zip = Join-Path (Split-Path -Parent $src.TrimEnd('\')) ("{0} {1} {2}.zip" -f (Split-Path -Leaf $src.TrimEnd('\')), $env:COMPUTERNAME, (Get-Date -Format 'yyyy-MM-dd'))
+        $ans = [System.Windows.MessageBox]::Show($window, "Save the backup as one zip file?`n`n$zip`n`nIt needs about as much free space as the backup. After the reset, load the zip in WinPrestige (Zip button or drag it onto the window): it unzips the long paths that Windows' own Extract can't.", 'WinPrestige', 'OKCancel', 'Question')
+        if ($ans -ne 'OK') { return }
+        $state.LogTarget = $ui.BackupLog
+        Start-WPJob 'Zip' { Compress-WPBackup $P.Source $P.Zip } @{ Source = $src; Zip = $zip } {
+            param($r, $err)
+            if ($r -and $r.Ok) { Set-WPStatus "Saved $($r.Zip) ($(Format-WPSize $r.Bytes))." }
+            elseif ($r) { Set-WPStatus "Couldn't zip the backup: $($r.Detail)" }
+        }
+    })
 $ui.BtnManualLinks.Add_Click({ Open-WPManualLinks })
 $ui.BtnQueueGames.Add_Click({ Start-WPQueueGames })
 $ui.BtnReadyReport.Add_Click({

@@ -16,7 +16,7 @@ function Initialize-WP {
         $Sync
     )
     $script:WP.Root = $Root
-    $script:WP.Version = '1.2.1'
+    $script:WP.Version = '1.3.0'
     $script:WP.StateDir = Join-Path $env:LOCALAPPDATA 'WinPrestige'
     if (-not (Test-Path -LiteralPath $script:WP.StateDir)) {
         New-Item -ItemType Directory -Path $script:WP.StateDir -Force | Out-Null
@@ -396,7 +396,7 @@ function Read-WPWingetManifest {
 function New-WPApp {
     return [pscustomobject]@{
         Key = ''; Name = ''; Version = ''; Latest = ''; Publisher = ''
-        WingetId = ''; Source = ''; Kind = ''; ArpId = ''; Pfn = ''; RegKey = ''
+        WingetId = ''; Source = ''; StoreId = ''; Kind = ''; ArpId = ''; Pfn = ''; RegKey = ''
         InstallLocation = ''; UninstallString = ''; Url = ''; DisplayIcon = ''; Icon = ''
         Category = ''; Via = ''; GameUri = ''; LauncherGame = $false
         Selected = $false; Match = ''; Candidates = @(); CustomUrl = ''
@@ -965,6 +965,88 @@ function Resolve-WPLinks {
     Write-WPLog ("Found packages for {0} of {1}. The rest are marked manual; pick a match or paste a download link in the details panel." -f $found, $todo.Count) 'ok'
 }
 
+function Get-WPWingetPublisher {
+    param([string]$Id, [string]$Source)
+    $res = Invoke-WPWinget @('show', '--id', $Id, '--exact', '--source', $Source, '--accept-source-agreements', '--disable-interactivity') -TimeoutSec 60
+    $line = $res.Lines | Where-Object { $_ -match '^\s*Publisher:\s*(.+)$' } | Select-Object -First 1
+    if (-not $line) { return '' }
+    return ($line -replace '^\s*Publisher:\s*', '').Trim()
+}
+
+function Find-WPVendorPackage {
+    # The vendor's own installer for an app that came from the Microsoft Store, if winget has one:
+    # same name, and the same publisher as the Store listing. A saved installer comes back offline
+    # and without a Microsoft account, which is why most people (gamers especially) prefer it.
+    param($App)
+    # Store listings add taglines and bitness: "Spotify - Music and Podcasts", "HWiNFO 64".
+    $query = (Get-WPCleanName $App.Name) -replace '(?i)\s+(x?64|32|64-bit|32-bit)$', ''
+    if (-not $query -or $query.Length -lt 2) { return $null }
+    $targets = @((Get-WPNormName $App.Name -Strict), (Get-WPNormName $App.Name), (Get-WPNormName $query)) | Where-Object { $_ } | Select-Object -Unique
+    $res = Invoke-WPWinget @('search', '--name', $query, '--source', 'winget', '--count', '12', '--accept-source-agreements', '--disable-interactivity') -TimeoutSec 90
+    $rows = @(ConvertFrom-WPWingetTable $res.Lines | Where-Object { $_.Id })
+    $exact = @($rows | Where-Object { $targets -contains (Get-WPNormName $_.Name -Strict) })
+    if ($exact.Count -eq 0) {
+        # Accept a name that differs only by a few characters at the end; the publisher check below still has to pass.
+        $target = $targets[-1]
+        $exact = @($rows | Where-Object {
+                $n = Get-WPNormName $_.Name -Strict
+                $n.Length -ge 4 -and ($target.StartsWith($n) -or $n.StartsWith($target)) -and [Math]::Abs($n.Length - $target.Length) -le 4
+            } | Sort-Object { [Math]::Abs((Get-WPNormName $_.Name -Strict).Length - $target.Length) } | Select-Object -First 1)
+    }
+    if ($exact.Count -eq 0) { return $null }
+    $pick = Select-WPBestCandidate @($exact | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Id = $_.Id } })
+    # Compare against the Store listing's publisher, which is known even when the registry has none.
+    $storePub = $App.Publisher
+    if ($App.WingetId -and $App.Source -eq 'msstore') { $p = Get-WPWingetPublisher $App.WingetId 'msstore'; if ($p) { $storePub = $p } }
+    if (-not $storePub) { return $null }
+    $vendorPub = Get-WPWingetPublisher $pick.Id 'winget'
+    $a = Get-WPPublisherTokens $storePub
+    $b = Get-WPPublisherTokens $vendorPub
+    if ($a.Count -eq 0 -or $b.Count -eq 0) { return $null }
+    foreach ($t in $a) { if ($b -contains $t) { return @{ Id = [string]$pick.Id; Name = [string]$pick.Name; Publisher = $vendorPub } } }
+    return $null
+}
+
+function Resolve-WPVendorPackages {
+    # For ticked Store apps, switch to the vendor's own installer when winget has one. The Store id
+    # is kept as StoreId, so the restore can still fall back to the Store. $Keep lists apps you chose
+    # to keep on the Store.
+    param([object[]]$Apps, [hashtable]$Keep, [switch]$Force)
+    $todo = @($Apps | Where-Object {
+            $_.WingetId -and $_.Source -eq 'msstore' -and -not $_.StoreId -and
+            ($_.Selected -or (Get-WPCategoryInfo $_.Category).selected) -and
+            @('games', 'system', 'bundled') -notcontains $_.Category -and -not ($Keep -and $Keep[$_.Key])
+        })
+    if ($todo.Count -eq 0) { return }
+    Write-WPLog ("Checking whether {0} Microsoft Store apps have the vendor's own installer..." -f $todo.Count) 'step'
+    $cache = Get-WPLinkCache
+    $i = 0; $found = 0
+    foreach ($app in $todo) {
+        if (Test-WPCancel) { break }
+        $i++
+        Set-WPProgress $i $todo.Count ("Looking for {0}'s own installer" -f $app.Name)
+        $ck = 'vendor:' + $app.Key.ToLowerInvariant()
+        $hit = $cache[$ck]
+        $fresh = $false
+        if ($hit -and $hit.When) { try { $fresh = ((Get-Date) - [datetime]::Parse($hit.When)).TotalDays -lt 14 } catch { } }
+        if (-not ($hit -and $fresh -and -not $Force)) {
+            $v = Find-WPVendorPackage $app
+            $hit = @{ Id = $(if ($v) { $v.Id } else { '' }); When = (Get-Date).ToString('o') }
+            $cache[$ck] = $hit
+        }
+        if ($hit.Id) {
+            $app | Add-Member -NotePropertyName StoreId -NotePropertyValue ([string]$app.WingetId) -Force
+            $app.WingetId = [string]$hit.Id
+            $app.Source = 'winget'
+            $app.Match = 'vendor'
+            $found++
+            Send-WPMessage 'app' @{ Key = $app.Key }
+        }
+    }
+    Save-WPLinkCache $cache
+    if ($found) { Write-WPLog ("{0} of {1} Store apps will be saved with the vendor's own installer instead of the Store." -f $found, $todo.Count) 'ok' }
+}
+
 #endregion
 
 #region Measuring -------------------------------------------------------------
@@ -1283,6 +1365,14 @@ function Get-WPExtras {
     $d.Info = 'Exported at backup time'
     $list += $d
 
+    $pins = @(Get-WPTaskbarPins)
+    $sl = New-WPExtra 'startlayout' 'Start menu and taskbar' 'Pinned apps and folders on Start, and pinned apps on the taskbar, in the same order. Restored after the apps, and only for apps that are installed by then.'
+    $sl.Available = $pins.Count -gt 0 -or (Test-Path -LiteralPath (Get-WPStartLayoutFolder))
+    $sl.Selected = $sl.Available
+    $sl.Bytes = 0
+    $sl.Info = if ($pins.Count) { "$($pins.Count) taskbar pins" } else { 'Start pins' }
+    $list += $sl
+
     foreach ($f in @(Get-WPUserFolders)) {
         $u = New-WPExtra ('folder:' + $f.Id) ("$($f.Id) folder") $f.Path
         $u.Data = $f
@@ -1301,6 +1391,213 @@ function Update-WPExtraSize {
         if ($Extra.Data.OneDrive) { $info += ' - synced by OneDrive' }
         $Extra.Info = $info
     }
+}
+
+#endregion
+
+#region Start menu and taskbar --------------------------------------------------
+
+function Get-WPStartLayoutFolder {
+    return (Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.Windows.StartMenuExperienceHost_cw5n1h2txyewy\LocalState')
+}
+
+function Get-WPPinnedFolder {
+    return (Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned')
+}
+
+function Get-WPWindowsBuild {
+    try { return [int](Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion' -ErrorAction Stop).CurrentBuildNumber } catch { return 0 }
+}
+
+function Split-WPTaskband {
+    # The taskbar keeps its pins in two parallel lists under Explorer\Taskband:
+    #   Favorites        = (0x00, UInt32 size, item ID list) per pin, then 0xFF
+    #   FavoritesResolve = (UInt32 size, shell link) per pin
+    # Returns one record per pin, or $null if the data doesn't look like that.
+    param([byte[]]$Favorites, [byte[]]$Resolve)
+    if (-not $Favorites -or -not $Resolve) { return $null }
+    $favs = New-Object System.Collections.Generic.List[byte[]]
+    $i = 0
+    while ($i -lt $Favorites.Length -and $Favorites[$i] -ne 0xFF) {
+        if ($Favorites[$i] -ne 0 -or $i + 5 -gt $Favorites.Length) { return $null }
+        $size = [BitConverter]::ToUInt32($Favorites, $i + 1)
+        if ($i + 5 + $size -gt $Favorites.Length) { return $null }
+        $rec = New-Object byte[] (4 + $size)
+        [Array]::Copy($Favorites, $i + 1, $rec, 0, 4 + $size)
+        $favs.Add($rec)
+        $i += 5 + $size
+    }
+    if ($i -ne $Favorites.Length - 1) { return $null }
+    $links = New-Object System.Collections.Generic.List[byte[]]
+    $j = 0
+    while ($j -lt $Resolve.Length) {
+        if ($j + 4 -gt $Resolve.Length) { return $null }
+        $size = [BitConverter]::ToUInt32($Resolve, $j)
+        if ($size -eq 0 -or $j + 4 + $size -gt $Resolve.Length) { return $null }
+        $rec = New-Object byte[] (4 + $size)
+        [Array]::Copy($Resolve, $j, $rec, 0, 4 + $size)
+        $links.Add($rec)
+        $j += 4 + $size
+    }
+    if ($favs.Count -ne $links.Count) { return $null }
+    $out = @()
+    for ($k = 0; $k -lt $favs.Count; $k++) { $out += , @{ Fav = $favs[$k]; Res = $links[$k] } }
+    return $out
+}
+
+function Join-WPTaskband {
+    param([object[]]$Records)
+    $fav = New-Object System.Collections.Generic.List[byte]
+    $res = New-Object System.Collections.Generic.List[byte]
+    foreach ($r in $Records) {
+        $fav.Add(0); $fav.AddRange([byte[]]$r.Fav)
+        $res.AddRange([byte[]]$r.Res)
+    }
+    $fav.Add(0xFF)
+    return @{ Favorites = $fav.ToArray(); Resolve = $res.ToArray() }
+}
+
+function Get-WPTaskbarPins {
+    # The taskbar's pins in order: a shortcut under User Pinned, or a Store app's id.
+    $k = Get-Item -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband' -ErrorAction SilentlyContinue
+    if (-not $k) { return @() }
+    $recs = Split-WPTaskband ([byte[]]$k.GetValue('Favorites')) ([byte[]]$k.GetValue('FavoritesResolve'))
+    if (-not $recs) { return @() }
+    $pinned = (Get-WPPinnedFolder).TrimEnd('\')
+    $shell = $null
+    try { $shell = New-Object -ComObject WScript.Shell } catch { }
+    $pins = @()
+    foreach ($r in $recs) {
+        # Shell links store paths as both ANSI and Unicode text, at odd or even offsets; read every way.
+        $text = @(
+            [Text.Encoding]::Unicode.GetString($r.Res), [Text.Encoding]::Unicode.GetString($r.Res, 1, $r.Res.Length - 1), [Text.Encoding]::Default.GetString($r.Res),
+            [Text.Encoding]::Unicode.GetString($r.Fav), [Text.Encoding]::Unicode.GetString($r.Fav, 1, $r.Fav.Length - 1)
+        ) -join ' '
+        $lnk = ''
+        $m = [regex]::Match($text, [regex]::Escape($pinned) + '\\([^\x00-\x1f"<>|*?]+?\.lnk)', 'IgnoreCase')
+        if ($m.Success) { $lnk = $m.Groups[1].Value }
+        $aumid = ''
+        $a = [regex]::Match($text, '[A-Za-z0-9][\w.\-]*_[a-z0-9]{13}![\w.\-]+')
+        if ($a.Success) { $aumid = $a.Value }
+        $name = ''; $target = ''
+        if ($lnk) {
+            $name = [IO.Path]::GetFileNameWithoutExtension($lnk)
+            $file = Join-Path $pinned $lnk
+            if ($shell -and (Test-Path -LiteralPath $file)) { try { $target = [string]$shell.CreateShortcut($file).TargetPath } catch { } }
+        } elseif ($aumid) { $name = $aumid.Split('_')[0] }
+        $pins += [pscustomobject]@{
+            Name = $name; Lnk = $lnk; Aumid = $aumid
+            Target = $(if ($target) { ConvertTo-WPTokenPath $target } else { '' })
+            Fav = [Convert]::ToBase64String($r.Fav); Res = [Convert]::ToBase64String($r.Res)
+        }
+    }
+    return $pins
+}
+
+function Backup-WPStartLayout {
+    param([string]$Dir)
+    if (Test-Path -LiteralPath $Dir) { Remove-Item -LiteralPath $Dir -Recurse -Force }
+    New-Item -ItemType Directory -Path $Dir -Force | Out-Null
+    $parts = @()
+    $start = @(Get-ChildItem -LiteralPath (Get-WPStartLayoutFolder) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^start\d*\.bin$' })
+    if ($start.Count) {
+        New-Item -ItemType Directory -Path (Join-Path $Dir 'Start') -Force | Out-Null
+        foreach ($f in $start) { Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $Dir "Start\$($f.Name)") -Force }
+        $parts += 'Start layout'
+    }
+    $pins = @(Get-WPTaskbarPins)
+    if ($pins.Count) {
+        Invoke-WPRobocopy (Get-WPPinnedFolder) (Join-Path $Dir 'UserPinned') | Out-Null
+        $parts += "$($pins.Count) taskbar pins"
+    }
+    $spec = [ordered]@{ build = (Get-WPWindowsBuild); userProfile = $env:USERPROFILE; pins = @($pins) }
+    Write-WPJson $spec (Join-Path $Dir 'layout.json')
+    return @{ Status = $(if ($parts.Count) { 'Saved' } else { 'Skipped' }); Detail = ($parts -join ', '); Folder = 'StartLayout' }
+}
+
+function Test-WPPinInstalled {
+    param($Pin, $StartIds, $Families)
+    if ($Pin.Aumid) {
+        $family = ([string]$Pin.Aumid).Split('!')[0]
+        return [bool]($Families[$family.ToLowerInvariant()] -or $StartIds[([string]$Pin.Aumid).ToLowerInvariant()])
+    }
+    if ($Pin.Target) {
+        $t = Expand-WPPath ([string]$Pin.Target)
+        return (Test-Path -LiteralPath $t)
+    }
+    # A shortcut with no file target (File Explorer, Control Panel and other shell items) is part of Windows.
+    return $true
+}
+
+function Restore-WPStartLayout {
+    param([string]$Dir, [switch]$TestRun)
+    $spec = Read-WPJson (Join-Path $Dir 'layout.json')
+    if (-not $spec) { return @{ Ok = $false; Detail = 'layout.json missing' } }
+    $build = Get-WPWindowsBuild
+    $notes = @()
+
+    $startIds = @{}; $families = @{}
+    try { foreach ($s in @(Get-StartApps)) { if ($s.AppID) { $startIds[([string]$s.AppID).ToLowerInvariant()] = $true } } } catch { }
+    try { foreach ($p in @(Get-AppxPackage)) { $families[([string]$p.PackageFamilyName).ToLowerInvariant()] = $true } } catch { }
+
+    $pins = @($spec.pins)
+    $keep = @(); $left = @()
+    foreach ($p in $pins) { if (Test-WPPinInstalled $p $startIds $families) { $keep += $p } else { $left += $p } }
+    $sameUser = (-not $spec.userProfile) -or ([string]$spec.userProfile -ieq $env:USERPROFILE)
+    $startFiles = @(Get-ChildItem -LiteralPath (Join-Path $Dir 'Start') -File -ErrorAction SilentlyContinue)
+    $doStart = $startFiles.Count -gt 0 -and $build -ge 22000 -and [int]$spec.build -ge 22000
+    if ($startFiles.Count -and -not $doStart) { $notes += "the Start layout is from a different version of Windows, so it was left alone" }
+
+    if ($TestRun) {
+        $t = "Would pin $($keep.Count) of $($pins.Count) taskbar apps"
+        if ($left.Count) { $t += " (leaving off $(@($left | ForEach-Object { $_.Name }) -join ', '))" }
+        if ($doStart) { $t += ' and put back the Start layout' }
+        return @{ Ok = $true; Detail = $t }
+    }
+
+    # Save what's there now, so it can be put back by hand (see the log).
+    $undo = Join-Path $script:WP.StateDir ('undo\startlayout\' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Path $undo -Force | Out-Null
+    & reg.exe export 'HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband' (Join-Path $undo 'Taskband.reg') /y 2>&1 | Out-Null
+    Invoke-WPRobocopy (Get-WPPinnedFolder) (Join-Path $undo 'UserPinned') | Out-Null
+    foreach ($f in @(Get-ChildItem -LiteralPath (Get-WPStartLayoutFolder) -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^start\d*\.bin$' })) { Copy-Item -LiteralPath $f.FullName -Destination $undo -Force }
+
+    $pinText = ''
+    if ($pins.Count -and -not $sameUser) {
+        $notes += "your user folder changed from $($spec.userProfile), so the taskbar pins would point at the old one; pin them again by hand"
+    } elseif ($pins.Count) {
+        $dst = Get-WPPinnedFolder
+        Invoke-WPRobocopy (Join-Path $Dir 'UserPinned') $dst | Out-Null
+        # Shortcuts for apps that aren't here would show as blank icons, so leave them off entirely.
+        foreach ($p in $left) { if ($p.Lnk) { $f = Join-Path $dst $p.Lnk; if (Test-Path -LiteralPath $f) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue } } }
+        $joined = Join-WPTaskband @($keep | ForEach-Object { @{ Fav = [Convert]::FromBase64String($_.Fav); Res = [Convert]::FromBase64String($_.Res) } })
+        $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Taskband'
+        if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key -Force | Out-Null }
+        Set-ItemProperty -LiteralPath $key -Name 'Favorites' -Value ([byte[]]$joined.Favorites) -Type Binary
+        Set-ItemProperty -LiteralPath $key -Name 'FavoritesResolve' -Value ([byte[]]$joined.Resolve) -Type Binary
+        $pinText = "$($keep.Count) of $($pins.Count) taskbar pins"
+        if ($left.Count) { $pinText += " (left off, not installed: $(@($left | ForEach-Object { $_.Name }) -join ', '))" }
+    }
+
+    if ($doStart) {
+        Get-Process -Name 'StartMenuExperienceHost' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 600
+        foreach ($f in $startFiles) { Copy-Item -LiteralPath $f.FullName -Destination (Join-Path (Get-WPStartLayoutFolder) $f.Name) -Force }
+    }
+
+    # Explorer reads the pins when it starts. Ending it makes Windows start it again (not as administrator).
+    Get-Process -Name 'explorer' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    $back = $false
+    for ($w = 0; $w -lt 16 -and -not $back; $w++) { Start-Sleep -Milliseconds 500; $back = [bool](Get-Process -Name 'explorer' -ErrorAction SilentlyContinue) }
+    if (-not $back) { & runas.exe /trustlevel:0x20000 explorer.exe 2>&1 | Out-Null }
+
+    Write-WPLog "  the previous Start and taskbar layout was saved in $undo" 'info'
+    $done = @()
+    if ($doStart) { $done += 'Start layout' }
+    if ($pinText) { $done += $pinText }
+    $detail = $(if ($done.Count) { 'Restored ' + ($done -join ' and ') } else { 'Nothing restored' })
+    if ($notes.Count) { $detail += '; ' + ($notes -join '; ') }
+    return @{ Ok = [bool]$done.Count; Detail = $detail }
 }
 
 #endregion
@@ -2006,6 +2303,7 @@ function Backup-WPExtra {
             $n = @(Get-ChildItem -LiteralPath $dir -Filter '*.inf' -Recurse).Count
             return @{ Status = $(if ($code -ge 8) { 'Partial' } else { 'Saved' }); Detail = "$n driver packages"; Folder = 'Drivers' }
         }
+        'startlayout' { return (Backup-WPStartLayout (Join-Path $ExtrasRoot 'StartLayout')) }
         'folder:*' {
             $name = $Extra.Id.Substring(7)
             $dir = Join-Path $ExtrasRoot ("UserFolders\" + $name)
@@ -2063,10 +2361,12 @@ function Invoke-WPBackup {
         $entry = [ordered]@{
             Key = $app.Key; Name = $app.Name; Version = $app.Version; Publisher = $app.Publisher
             Category = $app.Category; Via = $app.Via; Selected = [bool]$app.Selected
-            WingetId = $app.WingetId; Source = $app.Source; Match = $app.Match; Pfn = $app.Pfn
+            WingetId = $app.WingetId; Source = $app.Source; StoreId = [string]$app.StoreId; Match = $app.Match; Pfn = $app.Pfn
             Url = $app.Url; CustomUrl = $app.CustomUrl; GameUri = $app.GameUri; LauncherGame = [bool]$app.LauncherGame
             Download = $null; Method = ''
         }
+        # Where a game's files are, so the restore can hand them back to Steam in the same library.
+        if ($app.Category -eq 'games' -and $app.InstallLocation) { $entry.Location = [string]$app.InstallLocation }
         if ($app.Selected -and $Options.Installers -and (($app.WingetId -and $app.Source -eq 'winget') -or $app.CustomUrl)) {
             $n++
             Set-WPProgress $n $toDownload.Count ("Downloading {0}" -f $app.Name)
@@ -2569,6 +2869,17 @@ function Install-WPOnline {
     return @{ Ok = $false; Detail = (Get-WPWingetError $res) }
 }
 
+function Install-WPStoreFallback {
+    # An app that came from the Store on the old PC but was saved with the vendor's installer:
+    # if that didn't work, get it from the Store as before.
+    param($Entry, $Result, [hashtable]$Options)
+    if ($Result.Ok -or -not $Entry.StoreId -or -not $Options.OnlineFallback -or -not $script:WP.Winget) { return $Result }
+    $why = $Result.Detail
+    $r = Install-WPOnline ([string]$Entry.StoreId) 'msstore' -Interactive:(-not $Options.Silent)
+    if ($r.Ok) { $r.Detail = "$($r.Detail) (the vendor's installer didn't work: $why)" }
+    return $r
+}
+
 function Install-WPEntry {
     param($Entry, [string]$BackupRoot, [hashtable]$Options, $DepIndex, [hashtable]$DoneDeps, $Installed)
     $dl = $Entry.Download
@@ -2606,18 +2917,397 @@ function Install-WPEntry {
                 $r = Install-WPOnline $Entry.WingetId $Entry.Source -Interactive:$interactive
                 if ($r.Ok) { $r.Detail = "$($r.Detail) (local installer: $why)" }
             }
-            return $r
+            return (Install-WPStoreFallback $Entry $r $Options)
         }
-        { @('winget', 'store') -contains $_ } {
+        'winget' {
             if ($Options.TestRun) { return @{ Ok = $true; Detail = "Would install $($Entry.WingetId) from $($Entry.Source)" } }
             if (-not $script:WP.Winget) { return @{ Ok = $false; Detail = 'winget is not available yet. Update "App Installer" from the Microsoft Store and try again.' } }
-            return (Install-WPOnline $Entry.WingetId $Entry.Source -Interactive:$interactive)
+            return (Install-WPStoreFallback $Entry (Install-WPOnline $Entry.WingetId $Entry.Source -Interactive:$interactive) $Options)
+        }
+        'store' {
+            if ($Options.TestRun) {
+                if ($Options.PreferVendor) { return @{ Ok = $true; Detail = "Would look for the vendor's own installer, else install $($Entry.WingetId) from the Store" } }
+                return @{ Ok = $true; Detail = "Would install $($Entry.WingetId) from the Store" }
+            }
+            if (-not $script:WP.Winget) { return @{ Ok = $false; Detail = 'winget is not available yet. Update "App Installer" from the Microsoft Store and try again.' } }
+            if ($Options.PreferVendor) {
+                # Backups made before 1.3.0 didn't look for the vendor's installer; do it now.
+                $v = $null
+                try { $v = Find-WPVendorPackage $Entry } catch { }
+                if ($v) {
+                    $r = Install-WPOnline $v.Id 'winget' -Interactive:$interactive
+                    if ($r.Ok) { $r.Detail = "$($r.Detail): the vendor's own version ($($v.Id)) instead of the Store"; return $r }
+                    Write-WPLog "  $($Entry.Name): the vendor's installer didn't work ($($r.Detail)), so it's coming from the Store" 'info'
+                }
+            }
+            return (Install-WPOnline $Entry.WingetId 'msstore' -Interactive:$interactive)
         }
         'storelink' { return @{ Ok = $false; Manual = $true; Detail = 'Open it in the Microsoft Store (Manual links button).' } }
         'game' { return @{ Ok = $false; Manual = $true; Detail = "Reinstall from $($Entry.Via)." } }
         default { return @{ Ok = $false; Manual = $true; Detail = 'Manual download (Manual links button).' } }
     }
 }
+
+#region Zipped backups ------------------------------------------------------------
+
+function Get-WPLongPath {
+    # \\?\ lets .NET use paths longer than 260 characters, which zipped settings folders often have.
+    param([string]$Path)
+    if ($Path.StartsWith('\\?\')) { return $Path }
+    if ($Path.StartsWith('\\')) { return '\\?\UNC\' + $Path.Substring(2) }
+    return '\\?\' + $Path
+}
+
+function Find-WPManifestFolder {
+    # The backup inside an unzipped folder: manifest.json at the top or up to two folders down.
+    param([string]$Root)
+    if (Test-Path -LiteralPath (Join-Path $Root 'manifest.json')) { return $Root.TrimEnd('\') }
+    foreach ($d in @(Get-ChildItem -LiteralPath $Root -Directory -ErrorAction SilentlyContinue)) {
+        if (Test-Path -LiteralPath (Join-Path $d.FullName 'manifest.json')) { return $d.FullName }
+        foreach ($e in @(Get-ChildItem -LiteralPath $d.FullName -Directory -ErrorAction SilentlyContinue)) {
+            if (Test-Path -LiteralPath (Join-Path $e.FullName 'manifest.json')) { return $e.FullName }
+        }
+    }
+    return $null
+}
+
+function Get-WPZipExtractFolder {
+    # A short folder to unzip into, so deep settings paths stay usable. Prefers the zip's own drive
+    # when it's a local disk, then the non-system drive with the most free space.
+    param([string]$Zip)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $need = [long]0
+    try { $z = [IO.Compression.ZipFile]::OpenRead($Zip); try { foreach ($e in $z.Entries) { $need += $e.Length } } finally { $z.Dispose() } } catch { $need = (Get-Item -LiteralPath $Zip).Length * 2 }
+    $disks = @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)
+    $own = $null
+    if ($Zip -match '^([A-Za-z]:)') { $own = $disks | Where-Object { $_.DeviceID -ieq $Matches[1] } | Select-Object -First 1 }
+    $order = @()
+    if ($own) { $order += $own }
+    $order += @($disks | Where-Object { $_.DeviceID -ine $env:SystemDrive } | Sort-Object FreeSpace -Descending)
+    $order += @($disks | Where-Object { $_.DeviceID -ieq $env:SystemDrive })
+    $pick = $order | Where-Object { [long]$_.FreeSpace -gt ($need + 2GB) } | Select-Object -First 1
+    if (-not $pick) { return @{ Folder = $null; Need = $need } }
+    $name = Get-WPSafeName ([IO.Path]::GetFileNameWithoutExtension($Zip)) 24
+    $base = Join-Path ($pick.DeviceID + '\') "WPRestore\$name"
+    $folder = $base; $i = 2
+    while ((Test-Path -LiteralPath $folder) -and -not (Find-WPManifestFolder $folder)) { $folder = "$base ($i)"; $i++ }
+    return @{ Folder = $folder; Need = $need }
+}
+
+function Expand-WPBackupZip {
+    # Unzips a zipped backup with long-path-safe paths (Windows' own "Extract all" stops at 260
+    # characters), and returns the backup folder inside it.
+    param([string]$Zip)
+    $where = Get-WPZipExtractFolder $Zip
+    if (-not $where.Folder) { return @{ Ok = $false; Detail = "No drive has room to unzip it ($(Format-WPSize $where.Need) needed)." } }
+    $dest = $where.Folder
+    $done = Find-WPManifestFolder $dest
+    if ($done -and (Test-Path -LiteralPath (Join-Path $dest '.unzipped'))) {
+        Write-WPLog "Already unzipped in $dest" 'info'
+        return @{ Ok = $true; Folder = $done }
+    }
+    New-Item -ItemType Directory -Path $dest -Force | Out-Null
+    Write-WPLog ("Unzipping {0} ({1}) to {2}..." -f (Split-Path -Leaf $Zip), (Format-WPSize $where.Need), $dest) 'step'
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $failed = New-Object System.Collections.Generic.List[string]
+    $unsafe = 0
+    $destFull = [IO.Path]::GetFullPath($dest).TrimEnd('\') + '\'
+    try {
+        $z = [IO.Compression.ZipFile]::OpenRead($Zip)
+        try {
+            $entries = @($z.Entries); $n = 0
+            foreach ($e in $entries) {
+                if (Test-WPCancel) { return @{ Ok = $false; Detail = 'Cancelled' } }
+                $n++
+                if ($n % 50 -eq 0) { Set-WPProgress $n $entries.Count ("Unzipping {0} of {1} files" -f $n, $entries.Count) }
+                $rel = $e.FullName.Replace('/', '\').TrimStart('\')
+                if (-not $rel) { continue }
+                $full = [IO.Path]::Combine($destFull, $rel)
+                # Never write outside the folder, whatever names the zip contains.
+                if ($rel -match '(^|\\)\.\.(\\|$)' -or $rel -match '^[A-Za-z]:') { $unsafe++; continue }
+                if ($rel.EndsWith('\')) { [void][IO.Directory]::CreateDirectory((Get-WPLongPath $full)); continue }
+                try {
+                    [void][IO.Directory]::CreateDirectory((Get-WPLongPath ([IO.Path]::GetDirectoryName($full))))
+                    $in = $e.Open()
+                    try {
+                        $out = New-Object IO.FileStream((Get-WPLongPath $full), [IO.FileMode]::Create, [IO.FileAccess]::Write)
+                        try { $in.CopyTo($out) } finally { $out.Dispose() }
+                    } finally { $in.Dispose() }
+                    try { [IO.File]::SetLastWriteTime((Get-WPLongPath $full), $e.LastWriteTime.DateTime) } catch { }
+                } catch { $failed.Add($rel) }
+            }
+        } finally { $z.Dispose() }
+    } catch {
+        $failed.Add('*')
+    }
+    if ($failed.Count) {
+        # Windows' own zip tool can use compression .NET can't read; tar.exe (built into Windows) fills the gaps.
+        $tar = Join-Path $env:windir 'System32\tar.exe'
+        if (Test-Path -LiteralPath $tar) {
+            Write-WPLog ("  {0} items need tar.exe; unzipping those with it..." -f $failed.Count) 'info'
+            & $tar -x -k -f $Zip -C $dest 2>&1 | Out-Null
+            $still = @($failed | Where-Object { $_ -ne '*' -and -not [IO.File]::Exists((Get-WPLongPath ([IO.Path]::Combine($destFull, $_)))) -and -not [IO.Directory]::Exists((Get-WPLongPath ([IO.Path]::Combine($destFull, $_)))) })
+            $failed = New-Object System.Collections.Generic.List[string]
+            foreach ($s in $still) { $failed.Add($s) }
+        }
+    }
+    $folder = Find-WPManifestFolder $dest
+    if (-not $folder) { return @{ Ok = $false; Detail = "That zip doesn't contain a WinPrestige backup (no manifest.json)." } }
+    [IO.File]::WriteAllText((Join-Path $dest '.unzipped'), (Get-Date).ToString('s'))
+    if ($unsafe) { Write-WPLog ("  skipped {0} items whose names point outside the backup folder" -f $unsafe) 'warn' }
+    if ($failed.Count) {
+        Write-WPLog ("  {0} files couldn't be unzipped, for example {1}" -f $failed.Count, $failed[0]) 'warn'
+        return @{ Ok = $true; Folder = $folder; Detail = "$($failed.Count) files couldn't be unzipped" }
+    }
+    Write-WPLog "Unzipped to $folder" 'ok'
+    return @{ Ok = $true; Folder = $folder }
+}
+
+function Compress-WPBackup {
+    # Zips a backup folder with tar.exe, which handles the long paths settings folders can have.
+    param([string]$Source, [string]$Zip)
+    $tar = Join-Path $env:windir 'System32\tar.exe'
+    if (-not (Test-Path -LiteralPath $tar)) { return @{ Ok = $false; Detail = 'tar.exe is missing (it comes with Windows 10 1803 and later).' } }
+    $partial = $Zip + '.partial'
+    if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+    Write-WPLog ("Zipping {0} to {1}..." -f $Source, $Zip) 'step'
+    $leaf = Split-Path -Leaf $Source.TrimEnd('\')
+    $parent = Split-Path -Parent $Source.TrimEnd('\')
+    $p = Start-Process -FilePath $tar -ArgumentList @('--format', 'zip', '-c', '-f', "`"$partial`"", '-C', "`"$parent`"", "`"$leaf`"") -NoNewWindow -PassThru
+    $null = $p.Handle   # keeps ExitCode readable after it exits
+    $script:WP.CurrentProcess = $p
+    while (-not $p.WaitForExit(1000)) {
+        if (Test-WPCancel) { try { $p.Kill() } catch { }; Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue; return @{ Ok = $false; Detail = 'Cancelled' } }
+        $sz = 0; try { $sz = (Get-Item -LiteralPath $partial).Length } catch { }
+        Set-WPProgress 0 1 ("Zipping the backup: {0} so far" -f (Format-WPSize $sz))
+    }
+    $script:WP.CurrentProcess = $null
+    if ($p.ExitCode -ne 0) { Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue; return @{ Ok = $false; Detail = "tar.exe exit code $($p.ExitCode)" } }
+    if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }
+    Move-Item -LiteralPath $partial -Destination $Zip
+    $size = (Get-Item -LiteralPath $Zip).Length
+    Write-WPLog ("Zipped the backup: {0} ({1}). Load it in WinPrestige to unzip it; it handles the long paths." -f $Zip, (Format-WPSize $size)) 'ok'
+    return @{ Ok = $true; Zip = $Zip; Bytes = $size }
+}
+
+#endregion
+
+#region Steam games -------------------------------------------------------------
+
+function Get-WPSteamRoot {
+    $cands = @()
+    try { $cands += [string](Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction Stop).SteamPath } catch { }
+    try { $cands += [string](Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction Stop).InstallPath } catch { }
+    $cands += (Join-Path ${env:ProgramFiles(x86)} 'Steam')
+    foreach ($c in $cands) {
+        if (-not $c) { continue }
+        $p = ($c -replace '/', '\').TrimEnd('\')
+        if (Test-Path -LiteralPath (Join-Path $p 'steam.exe')) { return $p }
+    }
+    return $null
+}
+
+function Get-WPSteamAppId {
+    param($Entry)
+    if ([string]$Entry.GameUri -match 'steam://\w+/(\d+)') { return $Matches[1] }
+    if ([string]$Entry.Key -match '^Steam App (\d+)$') { return $Matches[1] }
+    return ''
+}
+
+function Get-WPSteamLibraryOf {
+    # D:\SteamLibrary\steamapps\common\Game -> D:\SteamLibrary
+    param([string]$Location)
+    if ($Location -match '^(.+?)\\steamapps\\common\\[^\\]+') { return $Matches[1].TrimEnd('\') }
+    return ''
+}
+
+function Get-WPSteamLibraries {
+    # The library folders Steam itself knows about.
+    param([string]$Root)
+    $libs = @($Root)
+    $vdf = Join-Path $Root 'steamapps\libraryfolders.vdf'
+    if (Test-Path -LiteralPath $vdf) {
+        foreach ($m in [regex]::Matches([IO.File]::ReadAllText($vdf), '"path"\s+"([^"]+)"')) { $libs += ($m.Groups[1].Value -replace '\\\\', '\').TrimEnd('\') }
+    }
+    $seen = @{}
+    return @($libs | Where-Object { $_ -and -not $seen.ContainsKey($_.ToLowerInvariant()) } | ForEach-Object { $seen[$_.ToLowerInvariant()] = $true; $_ })
+}
+
+function Find-WPSteamLibrariesOnDisk {
+    # Steam library folders that survived the reset on this PC's drives (usually a second drive).
+    $found = @()
+    foreach ($d in @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction SilentlyContinue)) {
+        $root = $d.DeviceID + '\'
+        $cands = @('SteamLibrary', 'Steam', 'Games\Steam', 'Games\SteamLibrary', 'Program Files (x86)\Steam', 'Program Files\Steam') | ForEach-Object { Join-Path $root $_ }
+        $cands += @(Get-ChildItem -LiteralPath $root -Directory -Filter '*steam*' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        foreach ($c in ($cands | Select-Object -Unique)) {
+            $apps = Join-Path $c 'steamapps'
+            if ((Test-Path -LiteralPath (Join-Path $apps 'common')) -or @(Get-ChildItem -LiteralPath $apps -Filter 'appmanifest_*.acf' -ErrorAction SilentlyContinue).Count) { $found += $c.TrimEnd('\') }
+        }
+    }
+    return @($found | Select-Object -Unique)
+}
+
+function ConvertTo-WPVdfString {
+    param([string]$Text)
+    return ([string]$Text).Replace('\', '\\').Replace('"', '\"')
+}
+
+function Add-WPSteamLibrary {
+    # Adds a folder to Steam's library list (Steam must be closed). The old file is kept next to it.
+    param([string]$Root, [string]$Library)
+    $Library = $Library.TrimEnd('\')
+    New-Item -ItemType Directory -Path (Join-Path $Library 'steamapps\common') -Force | Out-Null
+    $vdf = Join-Path $Root 'steamapps\libraryfolders.vdf'
+    $text = ''
+    if (Test-Path -LiteralPath $vdf) { $text = [IO.File]::ReadAllText($vdf) }
+    $known = @([regex]::Matches($text, '"path"\s+"([^"]+)"') | ForEach-Object { ($_.Groups[1].Value -replace '\\\\', '\').TrimEnd('\') })
+    if ($known -contains $Library -or $Library -ieq $Root.TrimEnd('\')) { return $false }
+    $marker = Join-Path $Library 'libraryfolder.vdf'
+    $contentId = $null
+    if (Test-Path -LiteralPath $marker) {
+        $mm = [regex]::Match([IO.File]::ReadAllText($marker), '"contentid"\s+"(\d+)"')
+        if ($mm.Success) { $contentId = $mm.Groups[1].Value }
+    }
+    if (-not $contentId) {
+        $bytes = New-Object byte[] 8; (New-Object Security.Cryptography.RNGCryptoServiceProvider).GetBytes($bytes)
+        $contentId = [string]([BitConverter]::ToUInt64($bytes, 0) -shr 1)
+        $mk = "`"libraryfolder`"`n{`n`t`"contentid`"`t`t`"$contentId`"`n`t`"label`"`t`t`"`"`n}`n"
+        [IO.File]::WriteAllText($marker, $mk, (New-Object Text.UTF8Encoding $false))
+    }
+    if (-not $text.Trim()) {
+        $text = "`"libraryfolders`"`n{`n`t`"0`"`n`t{`n`t`t`"path`"`t`t`"$(ConvertTo-WPVdfString $Root)`"`n`t`t`"label`"`t`t`"`"`n`t`t`"contentid`"`t`t`"0`"`n`t`t`"totalsize`"`t`t`"0`"`n`t`t`"apps`"`n`t`t{`n`t`t}`n`t}`n}`n"
+    } else {
+        Copy-Item -LiteralPath $vdf -Destination ($vdf + '.winprestige') -Force
+    }
+    $next = 0
+    foreach ($m in [regex]::Matches($text, '(?m)^\t"(\d+)"\s*$')) { $next = [Math]::Max($next, [int]$m.Groups[1].Value + 1) }
+    $block = "`t`"$next`"`n`t{`n`t`t`"path`"`t`t`"$(ConvertTo-WPVdfString $Library)`"`n`t`t`"label`"`t`t`"`"`n`t`t`"contentid`"`t`t`"$contentId`"`n`t`t`"totalsize`"`t`t`"0`"`n`t`t`"update_clean_bytes_tally`"`t`t`"0`"`n`t`t`"time_last_update_verified`"`t`t`"0`"`n`t`t`"apps`"`n`t`t{`n`t`t}`n`t}`n"
+    $end = $text.LastIndexOf('}')
+    if ($end -lt 0) { return $false }
+    $text = $text.Substring(0, $end).TrimEnd() + "`n" + $block + "}`n"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $vdf) -Force | Out-Null
+    [IO.File]::WriteAllText($vdf, $text, (New-Object Text.UTF8Encoding $false))
+    return $true
+}
+
+function Write-WPSteamManifest {
+    # An app manifest marked "update required" makes Steam download the game into that library the
+    # next time it starts, with no install window to click through.
+    param([string]$Library, [string]$AppId, [string]$Name, [string]$InstallDir)
+    $body = "`"AppState`"`n{`n" +
+        "`t`"appid`"`t`t`"$AppId`"`n`t`"Universe`"`t`t`"1`"`n`t`"name`"`t`t`"$(ConvertTo-WPVdfString $Name)`"`n" +
+        "`t`"StateFlags`"`t`t`"1026`"`n`t`"installdir`"`t`t`"$(ConvertTo-WPVdfString $InstallDir)`"`n" +
+        "`t`"LastUpdated`"`t`t`"0`"`n`t`"SizeOnDisk`"`t`t`"0`"`n`t`"buildid`"`t`t`"0`"`n`t`"LastOwner`"`t`t`"0`"`n" +
+        "`t`"BytesToDownload`"`t`t`"0`"`n`t`"BytesDownloaded`"`t`t`"0`"`n`t`"AutoUpdateBehavior`"`t`t`"0`"`n" +
+        "`t`"AllowOtherDownloadsWhileRunning`"`t`t`"0`"`n`t`"ScheduledAutoUpdate`"`t`t`"0`"`n}`n"
+    $dir = Join-Path $Library 'steamapps'
+    New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $dir "appmanifest_$AppId.acf"), $body, (New-Object Text.UTF8Encoding $false))
+}
+
+function Get-WPSteamPlan {
+    # Where each ticked game goes: its old library when that drive is still here and wasn't the
+    # system drive, otherwise $Target (or Steam's own folder when there's no target).
+    param($Games, [string]$Root, [string]$Target)
+    $sys = $env:SystemDrive.TrimEnd('\').ToLowerInvariant()
+    $plan = @()
+    foreach ($g in @($Games)) {
+        $id = Get-WPSteamAppId $g
+        if (-not $id) { continue }
+        $loc = [string]$g.Location
+        $old = Get-WPSteamLibraryOf $loc
+        $lib = ''
+        if ($old -and -not $old.ToLowerInvariant().StartsWith($sys) -and (Test-Path -LiteralPath ([IO.Path]::GetPathRoot($old)))) { $lib = $old }
+        $needsChoice = -not $lib
+        if (-not $lib) { $lib = $(if ($Target) { $Target.TrimEnd('\') } else { $Root }) }
+        $dir = $(if ($loc) { Split-Path -Leaf $loc } else { Get-WPSafeName (Get-WPCleanName ([string]$g.Name)) })
+        $plan += [pscustomobject]@{ Name = [string]$g.Name; AppId = $id; Library = $lib; InstallDir = $dir; OldLibrary = $old; NeedsChoice = $needsChoice }
+    }
+    return $plan
+}
+
+function Install-WPSteamGames {
+    # Closes Steam, adds the library folders it needs (including old ones found on other drives, so
+    # games that survived the reset are picked up as installed), queues every other ticked game in its
+    # library, and opens Steam's Downloads page.
+    param($Games, [string]$Target)
+    $root = Get-WPSteamRoot
+    if (-not $root) { return @{ Ok = $false; Detail = 'Steam is not installed yet. Install it and sign in, then try again.' } }
+    $steam = @(Get-Process -Name 'steam' -ErrorAction SilentlyContinue)
+    if ($steam.Count) {
+        Write-WPLog 'Closing Steam so it picks up the changes when it starts...' 'step'
+        try { Start-Process -FilePath (Join-Path $root 'steam.exe') -ArgumentList '-shutdown' -ErrorAction Stop } catch { }
+        for ($w = 0; $w -lt 60 -and (Get-Process -Name 'steam' -ErrorAction SilentlyContinue); $w++) { Start-Sleep -Milliseconds 500 }
+        Get-Process -Name 'steam', 'steamwebhelper' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+    }
+    $libs = @(Get-WPSteamLibraries $root)
+    foreach ($l in @(Find-WPSteamLibrariesOnDisk)) {
+        if ($libs -contains $l) { continue }
+        if (Add-WPSteamLibrary $root $l) { Write-WPLog "  added the Steam library $l (it was still on disk)" 'ok'; $libs += $l }
+    }
+    $plan = @(Get-WPSteamPlan $Games $root $Target)
+    $already = @(); $queued = @()
+    foreach ($p in $plan) {
+        $existing = @($libs | Where-Object { Test-Path -LiteralPath (Join-Path $_ "steamapps\appmanifest_$($p.AppId).acf") }) | Select-Object -First 1
+        if ($existing) { $already += $p; Write-WPLog "  $($p.Name): already in $existing" 'info'; continue }
+        if ($libs -notcontains $p.Library) {
+            if (Add-WPSteamLibrary $root $p.Library) { Write-WPLog "  added the Steam library $($p.Library)" 'ok' }
+            $libs += $p.Library
+        }
+        Write-WPSteamManifest $p.Library $p.AppId $p.Name $p.InstallDir
+        $queued += $p
+        Write-WPLog "  $($p.Name): queued in $($p.Library)" 'ok'
+    }
+    Open-WPUrl 'steam://open/downloads'
+    $detail = "Queued $($queued.Count) games in Steam's downloads"
+    if ($already.Count) { $detail += "; $($already.Count) were already in a Steam library on this PC" }
+    return @{ Ok = $true; Detail = $detail; Queued = $queued.Count; Already = $already.Count }
+}
+
+#endregion
+
+#region Opening apps after a restore ---------------------------------------------
+
+function Find-WPStartApp {
+    # The Start menu entry that opens an app, matched by name. Skips uninstallers, help files and links.
+    param([string]$Name, [object[]]$StartApps)
+    $target = Get-WPNormName $Name
+    if (-not $target -or $target.Length -lt 2) { return $null }
+    $usable = @($StartApps | Where-Object {
+            $_.AppID -and $_.Name -notmatch '(?i)uninstall|readme|help|documentation|manual|website|on the web|release notes|license|support|safe mode' -and
+            [string]$_.AppID -notmatch '(?i)\.(url|chm|txt|pdf|html?|ini|log|rtf)$'
+        })
+    $exact = @($usable | Where-Object { (Get-WPNormName $_.Name) -eq $target })
+    if ($exact.Count) { return $exact[0] }
+    # "Mozilla Firefox" is "Firefox" in Start, "Elgato Stream Deck" is "Stream Deck": the vendor is often dropped.
+    $near = @($usable | Where-Object { $n = Get-WPNormName $_.Name; $n.Length -ge 4 -and ($n.StartsWith($target) -or $target.StartsWith($n) -or $target.EndsWith($n)) } | Sort-Object { [Math]::Abs((Get-WPNormName $_.Name).Length - $target.Length) })
+    if ($near.Count) { return $near[0] }
+    return $null
+}
+
+function Open-WPInstalledApps {
+    # Opens each app once (as you, not as administrator) so you can sign in to them one after another.
+    param([string[]]$Names)
+    $start = @()
+    try { $start = @(Get-StartApps) } catch { }
+    $opened = @(); $missing = @(); $seen = @{}
+    foreach ($n in @($Names | Where-Object { $_ })) {
+        if (Test-WPCancel) { break }
+        $app = Find-WPStartApp $n $start
+        if (-not $app) { $missing += $n; continue }
+        if ($seen[[string]$app.AppID]) { continue }
+        $seen[[string]$app.AppID] = $true
+        Start-Process -FilePath 'explorer.exe' -ArgumentList "`"shell:AppsFolder\$($app.AppID)`""
+        $opened += [string]$app.Name
+        Write-WPLog "  opened $($app.Name)" 'info'
+        Start-Sleep -Milliseconds 1500
+    }
+    return @{ Opened = $opened; Missing = $missing }
+}
+
+#endregion
 
 function Get-WPRestoreProgressPath {
     return (Join-Path $script:WP.StateDir 'restore-progress.json')
@@ -2747,6 +3437,7 @@ function Restore-WPExtra {
             & pnputil.exe /add-driver (Join-Path $tmp '*.inf') /subdirs /install | Out-Null
             return @{ Ok = $true; Detail = 'Drivers added (restart to finish)' }
         }
+        'startlayout' { return (Restore-WPStartLayout $dir -TestRun:$TestRun) }
         'folder:*' {
             $name = $Extra.Id.Substring(7)
             $target = switch ($name) {
@@ -2976,7 +3667,8 @@ function Invoke-WPRestore {
 
     if (-not (Test-WPCancel) -and @($Extras).Count) {
         Write-WPLog 'Restoring extras...' 'step'
-        foreach ($x in @($Extras)) {
+        # The Start and taskbar layout goes last, so the apps it pins are already installed.
+        foreach ($x in @(@($Extras) | Sort-Object { [int]([string]$_.Id -eq 'startlayout') })) {
             if (Test-WPCancel) { break }
             $key = 'extra:' + $x.Id
             Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Restoring...'; Level = 'step' }

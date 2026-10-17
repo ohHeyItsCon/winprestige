@@ -1,5 +1,15 @@
 # Cloud sign-in setup
 
+> **Beta.** OneDrive, Google Drive and Dropbox sign-in is in beta. Status of the shipped registrations:
+>
+> | Provider | Registration in `data/cloud-apps.json` | State |
+> | --- | --- | --- |
+> | Dropbox | app key `1z9d9oqyh15jz4l`, redirect `http://localhost:47615/` (`http://127.0.0.1:47615/` is registered too) | The app and both redirects are accepted by Dropbox's sign-in page. Signing in, uploading and restoring with a real account are not confirmed yet. |
+> | OneDrive | none | Can't sign in until a client ID is added. |
+> | Google Drive | none | Can't sign in until a client ID and secret are added. |
+>
+> When a sign-in fails, the log shows how far it got: **1.** the browser handed the answer back, **2.** the provider accepted the sign-in, **3.** WinPrestige can reach its folder. The error names the setting to change for the common registration mistakes.
+
 WinPrestige signs in to OneDrive, Google Drive and Dropbox with each provider's standard browser sign-in (OAuth 2 authorization code with PKCE). The browser shows the provider's own page, WinPrestige catches the answer on `http://localhost` / `http://127.0.0.1`, and it never sees the user's password.
 
 Each provider needs to know which app is asking, so WinPrestige ships with an app registration ID for each. These IDs are public identifiers, not secrets; every desktop app that uses these APIs embeds them. They go in [`data/cloud-apps.json`](../data/cloud-apps.json):
@@ -8,7 +18,7 @@ Each provider needs to know which app is asking, so WinPrestige ships with an ap
 {
   "onedrive":    { "clientId": "", "redirect": "http://localhost" },
   "googledrive": { "clientId": "", "clientSecret": "", "redirect": "http://127.0.0.1" },
-  "dropbox":     { "appKey": "", "redirect": "http://127.0.0.1:47615/" }
+  "dropbox":     { "appKey": "", "redirect": "http://localhost:47615/" }
 }
 ```
 
@@ -47,7 +57,7 @@ With `drive.file`, WinPrestige can only see the files and folders it created. Th
 
 1. In the [Dropbox App Console](https://www.dropbox.com/developers/apps), press **Create app**: **Scoped access**, **App folder**, name `WinPrestige`. The name has to be unique on Dropbox, and it becomes the folder name (`Apps > WinPrestige`).
 2. **Permissions**: tick `files.metadata.read`, `files.content.read` and `files.content.write`, then **Submit**.
-3. **Settings** > **OAuth 2**: add the redirect URI `http://127.0.0.1:47615/`, and set **Allow public clients (Implicit Grant & PKCE)** to **Allow**.
+3. **Settings** > **OAuth 2**: add the redirect URI `http://localhost:47615/` (it must match `dropbox.redirect` exactly, trailing slash included), and set **Allow public clients (Implicit Grant & PKCE)** to **Allow**.
 4. Copy the **App key** into `dropbox.appKey`. No app secret is needed with PKCE.
 5. A new app is in development status and works for up to 50 users. Apply for production on the same page when you release.
 
