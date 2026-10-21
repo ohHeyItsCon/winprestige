@@ -1,0 +1,38 @@
+<!-- "Restore app settings only": pick which apps' settings to put back. Styles come from the main window. -->
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Restore app settings" Width="620" Height="700" MinWidth="520" MinHeight="420"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource Bg}" FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display" ShowInTaskbar="False">
+  <Grid TextElement.Foreground="{DynamicResource Text}" Margin="22,18,22,18">
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto"/>
+      <RowDefinition Height="*"/>
+      <RowDefinition Height="Auto"/>
+    </Grid.RowDefinitions>
+    <StackPanel Grid.Row="0">
+      <TextBlock Text="Restore app settings" FontSize="19" FontWeight="SemiBold"/>
+      <TextBlock x:Name="SpIntro" Foreground="{DynamicResource Muted}" TextWrapping="Wrap" Margin="0,4,0,10"
+                 Text="Only the settings that haven't been put back on this PC yet are ticked. Install an app first, then restore its settings; nothing gets installed here."/>
+      <WrapPanel Margin="0,0,0,8">
+        <Button x:Name="SpLeft" Style="{DynamicResource Btn}" Padding="12,6" Margin="0,0,6,6" Content="Only what's left"/>
+        <Button x:Name="SpAll" Style="{DynamicResource Btn}" Padding="12,6" Margin="0,0,6,6" Content="All"/>
+        <Button x:Name="SpNone" Style="{DynamicResource Btn}" Padding="12,6" Margin="0,0,6,6" Content="None"/>
+      </WrapPanel>
+    </StackPanel>
+    <Border Grid.Row="1" Background="{DynamicResource Panel}" BorderBrush="{DynamicResource Line}" BorderThickness="1" CornerRadius="10">
+      <ScrollViewer VerticalScrollBarVisibility="Auto">
+        <StackPanel x:Name="SpList" Margin="6"/>
+      </ScrollViewer>
+    </Border>
+    <DockPanel Grid.Row="2" Margin="0,14,0,0">
+      <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+        <Button x:Name="SpCancel" Style="{DynamicResource Btn}" Padding="18,9" Margin="0,0,8,0" Content="Cancel"/>
+        <Button x:Name="SpRestore" Style="{DynamicResource BtnPrimary}" Padding="20,9" Margin="0">
+          <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="Segoe Fluent Icons, Segoe MDL2 Assets" Margin="0,1,10,0"/><TextBlock x:Name="SpRestoreText" Text="Restore"/></StackPanel>
+        </Button>
+      </StackPanel>
+      <TextBlock x:Name="SpCount" Foreground="{DynamicResource Muted}" VerticalAlignment="Center"/>
+    </DockPanel>
+  </Grid>
+</Window>

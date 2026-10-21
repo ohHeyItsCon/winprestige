@@ -1188,7 +1188,7 @@
               <Button x:Name="BtnStartRestore" Style="{StaticResource BtnPrimary}" Margin="0,16,0,8" Padding="12,10">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE768;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0"/><TextBlock Text="Start restore" FontSize="14"/></StackPanel>
               </Button>
-              <Button x:Name="BtnRestoreSettings" Style="{StaticResource BtnGhost}" ToolTip="Puts back the ticked app settings (and the Start and taskbar layout, if ticked) without installing anything. Use it after installing apps yourself.">
+              <Button x:Name="BtnRestoreSettings" Style="{StaticResource BtnGhost}" ToolTip="Pick which app settings to put back, without installing anything. Only the ones not back on this PC yet are ticked, so after installing a manual app you can restore just its settings.">
                 <StackPanel Orientation="Horizontal"><TextBlock Text="&#xE713;" FontFamily="{StaticResource Icons}" Margin="0,1,10,0" Foreground="{StaticResource Accent}"/><TextBlock Text="Restore app settings only"/></StackPanel>
               </Button>
               <Button x:Name="BtnOpenApps" Style="{StaticResource BtnGhost}" ToolTip="Opens every ticked app that's installed, one after another, so you can sign in to them.">

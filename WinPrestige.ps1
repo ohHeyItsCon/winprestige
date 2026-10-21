@@ -3220,6 +3220,98 @@ function Start-WPRestore {
     $script:RestoreOpenApps = $openApps
 }
 
+function Show-WPSettingsRestore {
+    # "Restore app settings only": checks what's already been put back on this PC and which apps are
+    # installed now, then lets you pick, with only what's left ticked.
+    if (-not $state.Restore) { [void][System.Windows.MessageBox]::Show($window, 'Load a backup folder first.', 'WinPrestige'); return }
+    $configs = @($state.Restore.configs | Where-Object { @('Saved', 'Partial') -contains $_.Status })
+    if ($configs.Count -eq 0) { [void][System.Windows.MessageBox]::Show($window, 'This backup has no app settings.', 'WinPrestige'); return }
+    if ($Demo) {
+        $i = 0
+        $plan = @(foreach ($c in $configs) { $i++; [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = $(if ($i % 4) { 'ok' } else { '' }); Detail = ''; When = (Get-Date).ToString('s'); AppInstalled = ($i % 7 -ne 0); Pending = -not ($i % 4) } })
+        Show-WPSettingsPicker $plan
+        return
+    }
+    Set-WPStatus "Checking which app settings are already back$Ellipsis"
+    Start-WPJob 'Settings check' { Get-WPSettingsPlan $P.Configs } @{ Configs = $configs } {
+        param($r, $err)
+        if ($err -or -not $r) { Set-WPStatus "Couldn't check the app settings: $(if ($err) { $err.Message })"; return }
+        Set-WPStatus 'Ready'
+        Show-WPSettingsPicker @($r)
+    }
+}
+
+function Show-WPSettingsPicker {
+    param([object[]]$Plan)
+    $dlg = [Windows.Markup.XamlReader]::Parse([IO.File]::ReadAllText((Join-Path $WPRoot 'lib\SettingsPicker.xaml'), [Text.Encoding]::UTF8))
+    $dlg.Resources.MergedDictionaries.Add($window.Resources)
+    $dlg.Owner = $window
+    if ($window.Icon) { $dlg.Icon = $window.Icon }
+    $d = @{ Win = $dlg; Checks = @(); Ok = $false }
+    foreach ($n in @('SpList', 'SpLeft', 'SpAll', 'SpNone', 'SpCancel', 'SpRestore', 'SpRestoreText', 'SpCount')) { $d[$n] = $dlg.FindName($n) }
+    $script:SettingsDlg = $d
+    $hasLayout = [bool](@($state.Restore.extras | Where-Object { $_.Id -eq 'startlayout' -and @('Saved', 'Partial') -contains $_.Status }).Count)
+    $rows = @($Plan | Sort-Object @{ e = { -not ($_.Pending -and $_.AppInstalled) } }, Name)
+    if ($hasLayout) { $rows += [pscustomobject]@{ Id = '*startlayout'; Name = 'Start menu and taskbar'; Outcome = ''; Detail = ''; When = ''; AppInstalled = $true; Pending = $false; Layout = $true } }
+    foreach ($p in $rows) {
+        $status = ''; $color = $Palette.Muted
+        $when = ''; try { if ($p.When) { $when = ' ' + ([datetime]$p.When).ToString('d MMM HH:mm') } } catch { }
+        switch ([string]$p.Outcome) {
+            'ok' { $status = "Put back$when"; $color = $Palette.Good }
+            'present' { $status = "Already in place$when"; $color = $Palette.Good }
+            'warn' { $status = "Put back$when, but some files needed a look"; $color = $Palette.Warn }
+            'failed' { $status = "Didn't work$when`: $($p.Detail)"; $color = $Palette.Bad }
+            default { $status = $(if ($p.PSObject.Properties['Layout']) { 'Re-pins the taskbar and Start. Tick it to run it again.' } else { 'Not restored on this PC yet' }) }
+        }
+        if (-not $p.AppInstalled) { $status += "  $MidDot  the app isn't installed yet"; if ($color -ne $Palette.Bad) { $color = $Palette.Warn } }
+        $cb = New-Object Windows.Controls.CheckBox
+        $cb.Style = $window.FindResource('Chk')
+        $cb.Margin = '8,6,8,6'
+        $cb.Tag = $p
+        $cb.IsChecked = [bool]($p.Pending -and $p.AppInstalled)
+        $sp = New-Object Windows.Controls.StackPanel
+        $sp.Margin = '8,0,0,0'
+        [void]$sp.Children.Add((New-WPText ([string]$p.Name) 13 $Palette.Text))
+        $st = New-WPText $status 11.5 $color -Wrap
+        $st.ToolTip = $status
+        [void]$sp.Children.Add($st)
+        $cb.Content = $sp
+        $cb.Add_Click({ Update-WPSettingsPickerCount })
+        [void]$d.SpList.Children.Add($cb)
+        $d.Checks += $cb
+    }
+    $d.SpLeft.Add_Click({ foreach ($c in $script:SettingsDlg.Checks) { $c.IsChecked = [bool]($c.Tag.Pending -and $c.Tag.AppInstalled) }; Update-WPSettingsPickerCount })
+    $d.SpAll.Add_Click({ foreach ($c in $script:SettingsDlg.Checks) { $c.IsChecked = $true }; Update-WPSettingsPickerCount })
+    $d.SpNone.Add_Click({ foreach ($c in $script:SettingsDlg.Checks) { $c.IsChecked = $false }; Update-WPSettingsPickerCount })
+    $d.SpCancel.Add_Click({ $script:SettingsDlg.Win.Close() })
+    $d.SpRestore.Add_Click({ $script:SettingsDlg.Ok = $true; $script:SettingsDlg.Win.Close() })
+    Update-WPSettingsPickerCount
+    [void]$dlg.ShowDialog()
+    $script:SettingsDlg = $null
+    if (-not $d.Ok) { return }
+    $picked = @($d.Checks | Where-Object { $_.IsChecked } | ForEach-Object { $_.Tag })
+    if ($picked.Count -eq 0) { return }
+    # Tick exactly what was picked on the Restore screen too, so the rows show their progress.
+    foreach ($p in $rows) {
+        $key = $(if ($p.PSObject.Properties['Layout']) { 'extra:startlayout' } else { 'config:' + $p.Id })
+        $want = [bool](@($picked | Where-Object { $_.Id -eq $p.Id }).Count)
+        $state.RestoreSel[$key] = $want
+        if ($state.RRows[$key]) { $state.RRows[$key].Check.IsChecked = $want }
+    }
+    Update-WPRestoreSummary
+    Start-WPRestore -SettingsOnly -NoConfirm
+}
+
+function Update-WPSettingsPickerCount {
+    $d = $script:SettingsDlg
+    if (-not $d) { return }
+    $n = @($d.Checks | Where-Object { $_.IsChecked }).Count
+    $left = @($d.Checks | Where-Object { $_.Tag.Pending -and $_.Tag.AppInstalled }).Count
+    $d.SpCount.Text = "$n of $($d.Checks.Count) ticked  $MidDot  $left still to do"
+    $d.SpRestoreText.Text = $(if ($n -eq 1) { 'Restore 1 app' } else { "Restore $n apps" })
+    $d.SpRestore.IsEnabled = $n -gt 0
+}
+
 function Get-WPOpenableEntries {
     # Ticked apps worth opening to sign in to: apps, launchers and Store apps, not runtimes or drivers.
     return @($state.Restore.apps | Where-Object { $state.RestoreSel[$_.Key] -and @('apps', 'launchers', 'store') -contains [string]$_.Category })
@@ -3455,7 +3547,7 @@ $ui.BtnBrowseZip.Add_Click({
         if ($d.ShowDialog($window)) { Hide-WPBanner; Import-WPBackup $d.FileName }
     })
 $ui.BtnStartRestore.Add_Click({ Start-WPRestore })
-$ui.BtnRestoreSettings.Add_Click({ Start-WPRestore -SettingsOnly })
+$ui.BtnRestoreSettings.Add_Click({ Show-WPSettingsRestore })
 $ui.BtnOpenApps.Add_Click({
         if (-not $state.Restore) { [void][System.Windows.MessageBox]::Show($window, 'Load a backup folder first.', 'WinPrestige'); return }
         $list = @(Get-WPOpenableEntries)

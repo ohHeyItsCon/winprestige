@@ -3309,6 +3309,80 @@ function Open-WPInstalledApps {
 
 #endregion
 
+#region What was restored on this PC ----------------------------------------------
+
+function Get-WPConfigHistoryPath { return (Join-Path $script:WP.StateDir 'restored-settings.json') }
+
+function Set-WPConfigHistory {
+    # Remembers how each app's settings went, so "Restore app settings only" can offer just what's left.
+    param([string]$Id, [string]$Name, [string]$Outcome, [string]$Detail)
+    $h = Get-WPConfigHistory
+    $h[$Id] = [ordered]@{ Name = $Name; Outcome = $Outcome; Detail = $Detail; When = (Get-Date).ToString('s') }
+    try { Write-WPJson $h (Get-WPConfigHistoryPath) } catch { }
+}
+
+function Get-WPConfigHistory {
+    $h = @{}
+    $j = $null
+    try { $j = Read-WPJson (Get-WPConfigHistoryPath) } catch { }
+    if ($j) { foreach ($p in $j.PSObject.Properties) { $h[$p.Name] = $p.Value } }
+    return $h
+}
+
+function Get-WPConfigHistoryFromLogs {
+    # Restores run by versions before 1.3.0 only left their result in the daily logs. Newest wins.
+    $byName = @{}
+    foreach ($f in @(Get-ChildItem -LiteralPath $script:WP.StateDir -Filter 'winprestige-*.log' -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        $day = $f.BaseName.Substring(12)
+        foreach ($line in [IO.File]::ReadLines($f.FullName)) {
+            if ($line -notmatch '^(\d\d:\d\d:\d\d)  (\S.*)$') { continue }
+            $t = $Matches[2]; $when = "$($day)T$($Matches[1])"
+            if ($t -match '^(.+) settings restored, but some files need a look') { $byName[$Matches[1]] = @{ Outcome = 'warn'; Detail = 'Some files needed a look'; When = $when } }
+            elseif ($t -match '^(.+) settings restored$') { $byName[$Matches[1]] = @{ Outcome = 'ok'; Detail = 'Restored'; When = $when } }
+            elseif ($t -match '^(.+) settings were already in place$') { $byName[$Matches[1]] = @{ Outcome = 'present'; Detail = 'Already in place'; When = $when } }
+            elseif ($t -match '^(.+) settings: (.+)$') { $byName[$Matches[1]] = @{ Outcome = 'failed'; Detail = $Matches[2]; When = $when } }
+        }
+    }
+    return $byName
+}
+
+function Get-WPInstalledNames {
+    # Display names of everything installed now (uninstall entries and Start menu apps), for app checks.
+    $names = New-Object System.Collections.Generic.List[string]
+    foreach ($r in @(Get-WPRegistryApps)) { $names.Add([string]$r.Name) }
+    try { foreach ($s in @(Get-StartApps)) { $names.Add([string]$s.Name) } } catch { }
+    return $names.ToArray()
+}
+
+function Get-WPSettingsPlan {
+    # For each app's settings in a backup: what happened last time on this PC, whether its app is
+    # installed now, and whether it still needs restoring.
+    param($Configs)
+    $hist = Get-WPConfigHistory
+    $logs = Get-WPConfigHistoryFromLogs
+    $installed = Get-WPInstalledNames
+    $plan = @()
+    foreach ($c in @($Configs)) {
+        $rec = $hist[[string]$c.Id]
+        if (-not $rec) { $rec = $logs[[string]$c.Name] }
+        $outcome = $(if ($rec) { [string]$rec.Outcome } else { '' })
+        $appOk = $true
+        if ($c.App) {
+            $pat = [string]$c.App
+            $appOk = [bool](@($installed | Where-Object { $_ -match $pat }).Count)
+        }
+        $done = @('ok', 'present') -contains $outcome
+        $plan += [pscustomobject]@{
+            Id = [string]$c.Id; Name = [string]$c.Name; Outcome = $outcome
+            Detail = $(if ($rec) { [string]$rec.Detail } else { '' }); When = $(if ($rec) { [string]$rec.When } else { '' })
+            AppInstalled = $appOk; Pending = (-not $done)
+        }
+    }
+    return $plan
+}
+
+#endregion
+
 function Get-WPRestoreProgressPath {
     return (Join-Path $script:WP.StateDir 'restore-progress.json')
 }
@@ -3634,6 +3708,7 @@ function Invoke-WPRestore {
             $key = 'config:' + $c.Id
             if (-not (Test-Path -LiteralPath (Join-Path $folder 'restore.json'))) {
                 Send-WPMessage 'restoreItem' @{ Key = $key; Status = 'Missing from backup'; Level = 'error' }
+                if (-not $test) { Set-WPConfigHistory ([string]$c.Id) ([string]$c.Name) 'failed' 'Missing from the backup' }
                 if ($progress) { $progress.done[$key] = 'failed'; Save-WPRestoreProgress $progress }
                 continue
             }
@@ -3655,11 +3730,13 @@ function Invoke-WPRestore {
                 $appFailed = @($list | Where-Object { $c.App -and $_.Name -match $c.App -and $results[[string]$_.Key] -and $results[[string]$_.Key].Mk -eq 'failed' }) | Select-Object -First 1
                 if ($appFailed) { Write-WPLog ("  {0} itself didn't install, so these settings will be used once you install it." -f $appFailed.Name) 'warn' }
                 $cfgResults += [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = @{ warn = 'warn'; info = 'present'; ok = 'ok' }[$level]; Detail = $lastText }
+                if (-not $test) { Set-WPConfigHistory ([string]$c.Id) ([string]$c.Name) (@{ warn = 'warn'; info = 'present'; ok = 'ok' }[$level]) $lastText }
                 if ($progress) { $progress.done[$key] = $(if ($level -eq 'info') { 'skipped' } else { 'ok' }); Save-WPRestoreProgress $progress }
             } catch {
                 Send-WPMessage 'restoreItem' @{ Key = $key; Status = $_.Exception.Message; Level = 'error' }
                 Write-WPLog ("{0} settings: {1}" -f $c.Name, $_.Exception.Message) 'error'
                 $cfgResults += [pscustomobject]@{ Id = [string]$c.Id; Name = [string]$c.Name; Outcome = 'failed'; Detail = $_.Exception.Message }
+                if (-not $test) { Set-WPConfigHistory ([string]$c.Id) ([string]$c.Name) 'failed' $_.Exception.Message }
                 if ($progress) { $progress.done[$key] = 'failed'; Save-WPRestoreProgress $progress }
             }
         }

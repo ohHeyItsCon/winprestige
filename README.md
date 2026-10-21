@@ -37,11 +37,15 @@ Everything runs on your PC. WinPrestige has no account, no telemetry, and sends 
 
 **Option 1:** Download `WinPrestige.zip` from [Releases](https://github.com/ohHeyItsCon/winprestige/releases), unzip it, and run `WinPrestige.exe`.
 
-**Option 2:** Paste this into PowerShell:
+**Option 2:** Paste one of these into PowerShell:
 
-```powershell
-irm https://raw.githubusercontent.com/ohHeyItsCon/winprestige/main/install.ps1 | iex
-```
+| Channel | What you get | Command |
+| --- | --- | --- |
+| **Stable** | The latest full release. Use this for a real reset. | `irm https://raw.githubusercontent.com/ohHeyItsCon/winprestige/main/install.ps1 \| iex` |
+| **Beta** | The newest release, including pre-releases with new features that haven't been fully tested yet. | `irm https://raw.githubusercontent.com/ohHeyItsCon/winprestige/main/install-beta.ps1 \| iex` |
+| **Dev** | The latest code on `main`, before it's released. May be broken. | `irm https://raw.githubusercontent.com/ohHeyItsCon/winprestige/main/install-dev.ps1 \| iex` |
+
+Each one installs to `%LOCALAPPDATA%\WinPrestige\app` (replacing whatever channel was there) and starts it. The version is shown in the bottom-right corner of the window. Pre-releases are listed on the [Releases](https://github.com/ohHeyItsCon/winprestige/releases) page with what's still untested.
 
 Windows asks for administrator rights, which installing apps needs. The exe isn't code-signed yet, so SmartScreen may say "Windows protected your PC". Click **More info**, then **Run anyway**, or use `WinPrestige.cmd` instead.
 
