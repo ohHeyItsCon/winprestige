@@ -26,8 +26,9 @@
         'beta' {
             # The newest published release, pre-releases included (GitHub lists them newest first).
             try {
-                $rel = @(Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=20" -Headers @{ 'User-Agent' = 'WinPrestige-installer' } |
-                        Where-Object { -not $_.draft }) | Select-Object -First 1
+                # Windows PowerShell passes a JSON array down the pipeline as one object, so unroll it first.
+                $all = Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=20" -Headers @{ 'User-Agent' = 'WinPrestige-installer' }
+                $rel = @(@($all) | ForEach-Object { $_ } | Where-Object { -not $_.draft }) | Select-Object -First 1
                 $asset = @($rel.assets | Where-Object { $_.name -eq 'WinPrestige.zip' }) | Select-Object -First 1
                 if ($asset) {
                     $url = $asset.browser_download_url
